@@ -1,6 +1,6 @@
 # Desktop Agent Bridge
 
-Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.7.0**。
+Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.0**，MIT 许可证。npm 包名为 `@neeetman/desktop-agent-bridge`；当前尚未正式发布。
 
 会话可以通过 MCP 主动互发消息、接收回复、请求决策，并在答复到达时唤醒原会话。支持按标题搜索后用精确 ID 路由、多会话队列、项目/工作区、模型与 effort 读回，以及 Codex 托管会话的下一轮权限设置。
 
@@ -53,7 +53,9 @@ Frida 固定为 `17.9.1`。未知 Codex/Claude 文件哈希会拒绝附着；不
 - [部署、验证与卸载](docs/deployment.md)
 - [从旧实验目录迁移](docs/migration.md)
 - [架构与源码入口](docs/architecture.md)
-- [Claude / Codex 更新适配方案（待实现）](docs/update-resilience.md)
+- [Claude / Codex 更新适配设计](docs/update-resilience.md)
+- [P0/P1 已实现的更新维护命令与边界](docs/update-operations.md)
+- [npm 发布与安装](docs/npm-release.md)
 - [本次验证范围](docs/validation.md)
 
 运行数据、凭证、配置备份和日志位于 `runtime/`；权限白名单及托管线程策略位于 `%USERPROFILE%\.desktop-session-bridge\`。这些数据不进 Git。跨机器部署时重新生成，不复制旧机器的 token、会话 ID 或线程策略。
@@ -71,4 +73,4 @@ npm run check
 
 本仓库从已验证的 v0.7 运行代码整理而来，排除了安装包提取物、旧的一次性分析脚本、真实聊天记录和本机运行状态。源机器的真实通信证据不随源码分发；独立仓库的离线测试不能替代第二台机器的冷安装和整机重启验收。
 
-项目尚未指定开源许可证；`private: true` 防止误发布到 npm。
+许可证见 [MIT](LICENSE)。发布包采用显式文件清单，不包含本机 runtime 或凭证。

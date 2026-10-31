@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {withCapability} from './compatibility.mjs';
 
 export class ClaudeNative {
   constructor(connectionFile = fileURLToPath(new URL('./runtime/claude-relay/connection.json', import.meta.url))) {
@@ -53,6 +54,7 @@ export class ClaudeTools {
   transport = 'claude-desktop-native-main-renderer-rpc';
   callerThread = 'claude-desktop-native-controller';
   constructor(connectionFile) { this.native = new ClaudeNative(connectionFile); }
+  async preflightDispatch(){await withCapability('claude','send',async()=>{});}
   async readTrackedTurn(threadId,turnId){
     let cursor='',rows=[];const cursors=new Set();
     for(let page=0;page<40;page++){

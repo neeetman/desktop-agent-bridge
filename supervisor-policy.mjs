@@ -33,3 +33,11 @@ export function installedDesktopExecutable(name, packages) {
   if (!identity || !installed?.InstallLocation) return null;
   return path.win32.join(installed.InstallLocation, 'app', executable);
 }
+export function runningDesktopCandidates(app,rows){
+ const values=[...rows.values()],same=(a,b)=>a?.toLowerCase()===b?.toLowerCase();
+ return values.filter(row=>{
+  const executable=row.ExecutablePath;if(!executable)return false;
+  const matches=same(executable,app.executable)||same(executable,app.installedExecutable)||app.name==='codex'&&/\\OpenAI\.Codex_[^\\]+\\app\\ChatGPT\.exe$/i.test(executable)||app.name==='claude'&&/\\Claude_[^\\]+\\app\\Claude\.exe$/i.test(executable);
+  return matches&&!same(rows.get(row.ParentProcessId)?.ExecutablePath,executable);
+ });
+}

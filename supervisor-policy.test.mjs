@@ -1,4 +1,11 @@
 import test from 'node:test';
+import {runningDesktopCandidates} from './supervisor-policy.mjs';
+test('installed updates do not hide the still-running old desktop, and new generations are discovered',()=>{
+ const old='C:\\Program Files\\WindowsApps\\OpenAI.Codex_1_x64__pkg\\app\\ChatGPT.exe',next='C:\\Program Files\\WindowsApps\\OpenAI.Codex_2_x64__pkg\\app\\ChatGPT.exe';
+ const app={name:'codex',executable:old,installedExecutable:next};const rows=new Map([[1,{ProcessId:1,ExecutablePath:old,ParentProcessId:0}],[2,{ProcessId:2,ExecutablePath:old,ParentProcessId:1}]]);
+ assert.equal(runningDesktopCandidates(app,rows).length,1);assert.equal(runningDesktopCandidates(app,rows)[0].ProcessId,1);
+ rows.clear();rows.set(3,{ProcessId:3,ExecutablePath:next,ParentProcessId:0});assert.equal(runningDesktopCandidates(app,rows)[0].ProcessId,3);
+});
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {spawn} from 'node:child_process';

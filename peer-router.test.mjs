@@ -19,6 +19,21 @@ function fixture() {
   return { router, tick, sends, backendRequest, directory, setBusy(value) { busy = value; }, setUnknown(value) { unknown = value; },setTask(value){taskStatus=value;},setTurn(value){nativeTurn=value;}, close() { router.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
 }
 const from = { app: 'codex', threadId: 'c' }, to = { app: 'claude', threadId: 'a' };
+
+test('update preflight blocks queued delivery without turning a known-unsent request into unknown',async()=>{
+ const f=fixture();try{f.setTask('running');const message=await f.router.send({from,to,text:'defer update',messageId:'update'});let blocked=true;
+ f.router.backendRequest=async(app,route,method,...rest)=>{if(method==='POST'&&blocked)throw Object.assign(Error('unsupported'),{status:503,code:'BUILD_UNSUPPORTED',dispatchNotStarted:true});return f.backendRequest(app,route,method,...rest);};
+ await f.tick();assert.equal(f.router.state.jobs[message.id].status,'queued');assert.equal(f.router.state.jobs[message.id].blockedByUpdate,'BUILD_UNSUPPORTED');assert.equal(f.sends.length,0);
+ blocked=false;await f.tick();assert.equal(f.sends.length,1);assert.equal(f.router.state.jobs[message.id].status,'delivered');
+ }finally{f.close();}
+});
+test('decision answers persist while the original sender is updating and are dispatched after recovery',async()=>{
+ const f=fixture();try{f.setTask('running');const decision=await f.router.requestDecision({from,to,question:'choose',options:['A','B']});
+ f.router.backendRequest=async(app,route,...rest)=>{if(app==='codex')throw Object.assign(Error('updating'),{status:503,code:'BUILD_UNSUPPORTED',dispatchNotStarted:true});return f.backendRequest(app,route,...rest);};
+ const answer=await f.router.answerDecision({from:to,decisionId:decision.id,answer:'A'});assert.equal(answer.status,'answered');assert.equal(f.router.state.jobs[answer.answerMessageId].status,'queued');await f.tick();assert.equal(f.router.state.jobs[answer.answerMessageId].status,'queued');
+ f.router.backendRequest=f.backendRequest;await f.tick();assert.equal(f.router.state.jobs[answer.answerMessageId].status,'delivered');assert.equal((await f.router.answerDecision({from:to,decisionId:decision.id,answer:'A'})).answerMessageId,answer.answerMessageId);
+ }finally{f.close();}
+});
 test('peer request automatically returns one final reply, queues while busy, and cannot form a reply loop', async () => {
   const f = fixture(); try {
     f.setTask('running');

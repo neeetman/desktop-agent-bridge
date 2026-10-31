@@ -43,4 +43,4 @@ SSE 游标、消息去重、任务与决策持久化在本机 runtime。断线�
 
 Codex helperRevision 绑定桥接源码字节，桌面文件哈希绑定应用构建，两者用途不同。修改 helper 源码后需重新计算其内容 revision 并运行 `npm run check`；修改桌面兼容清单必须附新的原生契约验证。
 
-针对桌面更新的多版本适配、缓存失效、能力门禁、空闲切换和回退，见 [更新适配方案](update-resilience.md)。该文档是后续设计，不代表现有运行时已具备这些机制。
+桌面更新使用 `compatibility.mjs` 统一选择已核验 profile、进程代次和安装身份；Python 监控通过 compat-service 接入同一状态。helper-binding 在原生入口检查身份与选用代次。候选/旧适配代码保存在本机不可变快照中。具体命令和限制见 [P0/P1 运维说明](update-operations.md)，后续目标见 [更新适配设计](update-resilience.md)。

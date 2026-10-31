@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "coreApiVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "app": "codex",
+  "id": "codex-26.1027.3384.0-b833a39b336d7294",
+  "packageVersion": "26.1027.3384.0",
+  "capabilities": [
+    "read",
+    "send",
+    "settings",
+    "execution",
+    "mcp"
+  ],
+  "adapterFiles": [
+    "codex-main-execution.cjs",
+    "codex-main-mcp.cjs",
+    "codex-runtime.cjs",
+    "execution-policy.cjs",
+    "helper-binding.cjs",
+    "claude-attach-agent.js"
+  ],
+  "manifests": {
+    "execution": {
+      "version": "26.1027.3384.0",
+      "executableSha256": "d8b9c500c4dc0fa2fd5a8a3a5592cd637c2a9e625a191d8733a0b7aa8143b11b",
+      "chromeSha256": "f66d0d4e578dc848dd0666bfa80063ea21402cc6155270316491656f26c3839d",
+      "asarSha256": "6fbedf054a8d8cafaf5c745b40aa59176512e106e0bd6308275ae123b60fd074",
+      "connectionModule": ".vite/build/early-bootstrap-339-096ec1020e8592e0.js",
+      "connectionModuleId": 67295,
+      "managerClass": "_X",
+      "managerModuleId": 83678,
+      "helperRevision": "af0fc1fd7dcafe79"
+    },
+    "mcp": {
+      "version": "26.1027.3384.0",
+      "executableSha256": "d8b9c500c4dc0fa2fd5a8a3a5592cd637c2a9e625a191d8733a0b7aa8143b11b",
+      "chromeSha256": "f66d0d4e578dc848dd0666bfa80063ea21402cc6155270316491656f26c3839d",
+      "asarSha256": "6fbedf054a8d8cafaf5c745b40aa59176512e106e0bd6308275ae123b60fd074",
+      "connectionModule": ".vite/build/early-bootstrap-339-096ec1020e8592e0.js",
+      "connectionModuleId": 67295,
+      "reloadOnAttach": false,
+      "helperRevision": "c8326d9e4c561345"
+    }
+  },
+  "hashes": {
+    "executableSha256": "d8b9c500c4dc0fa2fd5a8a3a5592cd637c2a9e625a191d8733a0b7aa8143b11b",
+    "chromeSha256": "f66d0d4e578dc848dd0666bfa80063ea21402cc6155270316491656f26c3839d",
+    "asarSha256": "6fbedf054a8d8cafaf5c745b40aa59176512e106e0bd6308275ae123b60fd074"
+  },
+  "adapterDigest": "3ffb92e6d3cf39f11ad8b1651956a0ed186509f29e726f6b8f0f45a3a02c34c8",
+  "revoked": false,
+  "evidence": {
+    "baseline": "v0.7 desktop contract; v0.8 coordinator offline tests",
+    "liveUpdateValidation": false
+  }
+}

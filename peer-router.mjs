@@ -6,6 +6,7 @@ import {execFile} from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from './contracts.mjs';
 import {publicResult,bridgeHeader,errorData} from './collaboration.mjs';
+import {coordinator} from './compatibility.mjs';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const bad = (status, message) => Object.assign(new Error(message), { status });
@@ -29,7 +30,7 @@ export class PeerRouter {
     const file = path.join(ROOT, { codex: 'runtime/connection.json', claude: 'runtime/claude/connection.json', deepseek: 'runtime/deepseek/connection.json' }[app] ?? 'invalid-app');
     const connection = JSON.parse(fs.readFileSync(file));
     const response = await fetch(connection.baseUrl + route, { method, headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(65000) });
-    const result = await response.json(); if (!response.ok) throw Object.assign(bad(response.status,typeof result.error==='string'?result.error:JSON.stringify(result)),{code:result.code}); return result;
+    const result = await response.json(); if (!response.ok) throw Object.assign(bad(response.status,typeof result.error==='string'?result.error:JSON.stringify(result)),{code:result.code,dispatchNotStarted:result.dispatchNotStarted,dispatchStage:result.dispatchStage}); return result;
   }
   async validate(who) { address(who);try{await this.backendRequest(who.app, `/v1/threads/${encodeURIComponent(who.threadId)}/settings`);}catch{await this.backendRequest(who.app,`/v1/threads/${encodeURIComponent(who.threadId)}`);} }
   async currentTurn(who){
@@ -62,7 +63,7 @@ export class PeerRouter {
     if (key && this.state.keys[key]) {
       const existing = this.state.keys[key]; if (existing.fingerprint !== fingerprint) throw bad(409, 'messageId reused with different content'); return this.state.messages[existing.id];
     }
-    await this.validate(from); await this.validate(to);
+    await this.validate(from); if(!['decision_answer','reply'].includes(kind))await this.validate(to);
     if (key && this.state.keys[key]) {
       const existing = this.state.keys[key]; if (existing.fingerprint !== fingerprint) throw bad(409, 'messageId reused with different content'); return this.state.messages[existing.id];
     }
@@ -158,6 +159,7 @@ export class PeerRouter {
         task = await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined }, `peer-router:${message.id}`);
       } catch (error) {
         if (error.status === 409) { job.status = 'queued'; this.save(); return; }
+        if(error.status===503&&error.dispatchNotStarted){job.status='queued';job.blockedByUpdate=error.code;this.save();return;}
         job.status = message.status = 'unknown'; job.error = error.message; this.save(); return;
       }
       job.taskId = task.id; job.status = message.status = ['unknown', 'failed'].includes(task.status) ? task.status : 'delivered'; message.deliveredAt = new Date().toISOString(); this.save();
@@ -188,7 +190,7 @@ export class PeerRouter {
       }
       await Promise.allSettled([...candidates.values()].map(async job => {
         try { await this.processJob(job); }
-        catch (error) { job.lastError = error.message; this.save(); }
+        catch (error) { job.lastError = error.message;job.lastErrorCode=error.code;if(error.status===503)job.blockedByUpdate=error.code; this.save(); }
       }));
     } finally { this.ticking = false; }
   }
@@ -233,6 +235,7 @@ export async function startRouter({ directory, port = 43130, backendRequest } = 
       if (request.headers.origin || request.headers.authorization !== `Bearer ${router.state.token}`) throw bad(401, 'Local router authorization required');
       const url = new URL(request.url, 'http://localhost');
       if (request.method === 'GET' && url.pathname === '/health') return reply(200, { ok: true, pid: process.pid, messages: Object.keys(router.state.messages).length });
+      if(request.method==='GET'&&url.pathname==='/v1/compatibility')return reply(200,await coordinator.doctor());
       let data = {}; if (request.method === 'POST') { let bytes = 0; const chunks = []; for await (const chunk of request) { bytes += chunk.length; if (bytes > 1024 * 1024) throw bad(413, 'Request too large'); chunks.push(chunk); } data = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
       switch (url.pathname) {
         case '/v1/send': return reply(202, await router.send(data));

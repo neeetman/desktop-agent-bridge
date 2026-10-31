@@ -2,7 +2,7 @@ import path from 'node:path';
 export function errorData(error,fallbackStatus=null){
   const httpStatus=Number.isInteger(error.status)?error.status:fallbackStatus;
   const codes={400:'INVALID_ARGUMENT',401:'UNAUTHORIZED',403:'FORBIDDEN',404:'NOT_FOUND',409:'CONFLICT',413:'PAYLOAD_TOO_LARGE',501:'NOT_IMPLEMENTED',502:'NATIVE_UNAVAILABLE',503:'NATIVE_UNAVAILABLE'};
-  return {code:error.code??codes[httpStatus]??'BRIDGE_ERROR',message:error.message??String(error),httpStatus};
+  return {code:error.code??codes[httpStatus]??'BRIDGE_ERROR',message:error.message??String(error),httpStatus,...error.dispatchNotStarted===undefined?{}:{dispatchNotStarted:error.dispatchNotStarted,dispatchStage:error.dispatchStage??'notStarted'}};
 }
 export function publicResult(value) {
   if (Array.isArray(value)) return value.map(publicResult);

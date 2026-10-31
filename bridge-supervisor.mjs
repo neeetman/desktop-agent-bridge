@@ -5,9 +5,11 @@ import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { backoffMs, childEnvironment, matchesScript, shouldRecover, restoreAppState, installedDesktopExecutable } from './supervisor-policy.mjs';
+import { backoffMs, childEnvironment, matchesScript, shouldRecover, restoreAppState, installedDesktopExecutable,runningDesktopCandidates } from './supervisor-policy.mjs';
 import { codexMcp } from './codex-mcp-control.mjs';
 import { lifecycle } from './claude-lifecycle.mjs';
+import {coordinator} from './compatibility.mjs';
+import {activateProfile} from './native-management.mjs';
 
 const ROOT=fileURLToPath(new URL('.',import.meta.url));
 const DIRECTORY=path.join(ROOT,'runtime/supervisor');
@@ -29,14 +31,14 @@ const journal=path.join(DIRECTORY,'events.jsonl');
 const record=(type,data)=>{fs.appendFileSync(journal,JSON.stringify({time:new Date().toISOString(),type,...data})+'\n',{mode:0o600});};
 
 async function snapshot(){
-  const command="@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','python.exe','pythonw.exe','Claude.exe','ChatGPT.exe','codex.exe','DeepSeek Harness.exe') } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress";
+  const command="@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','python.exe','pythonw.exe','Claude.exe','ChatGPT.exe','codex.exe','DeepSeek Harness.exe') -and $_.SessionId -eq (Get-Process -Id $PID).SessionId } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress";
   const {stdout}=await run(config.powershell,['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,timeout:10000,maxBuffer:8*1024*1024,env:environment});
   const rows=JSON.parse(stdout.trim()||'[]');return new Map((Array.isArray(rows)?rows:[rows]).map(row=>[row.ProcessId,row]));
 }
 async function request(file,route='/health',method='GET',body,timeout=2500){
   const connection=read(file);if(!connection?.baseUrl)throw Error('Connection not ready');
   const response=await fetch(connection.baseUrl+route,{method,headers:{Authorization:`Bearer ${connection.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(timeout)});
-  const value=await response.json();if(!response.ok)throw Error(`HTTP ${response.status}`);return value;
+  const value=await response.json();if(!response.ok)throw Object.assign(Error(value.error??`HTTP ${response.status}`),{code:value.code});return value;
 }
 const SERVICES=[
   {name:'claude-relay',script:'claude-file-relay.mjs',connection:'runtime/claude-relay/connection.json',http:true},
@@ -59,7 +61,7 @@ export class Supervisor {
   persist(){
     this.state.lastTickAt=Date.now();
     for(const service of this.services.values())this.state.services[service.name]={pid:service.pid??null,state:service.state??'waiting',restarts:service.restarts,failures:service.failures,lastError:service.lastError??null,nextStart:service.nextStart};
-    for(const app of this.apps.values())this.state.apps[app.name]={pid:app.pid,closedByUser:app.closedByUser,lastExitCode:app.lastExitCode??null,state:app.pid?'running':app.closedByUser?'closed_by_user':'starting'};
+    for(const app of this.apps.values())this.state.apps[app.name]={pid:app.pid,runningExecutable:app.executable,installedExecutable:app.installedExecutable??app.executable,updatePending:!!app.pid&&!!app.installedExecutable&&app.executable!==app.installedExecutable,closedByUser:app.closedByUser,lastExitCode:app.lastExitCode??null,state:app.pid?'running':app.closedByUser?'closed_by_user':'starting'};
     atomic(path.join(DIRECTORY,'state.json'),this.state);
   }
   logHandles(name){
@@ -144,9 +146,11 @@ export class Supervisor {
   }
   async ensureApps(rows){
     for(const app of this.apps.values()){
-      const candidates=[...rows.values()].filter(row=>row.ExecutablePath?.toLowerCase()===app.executable.toLowerCase()&&rows.get(row.ParentProcessId)?.ExecutablePath?.toLowerCase()!==app.executable.toLowerCase());
+      const candidates=runningDesktopCandidates(app,rows);
+      if(candidates.length>1){record('desktop.ambiguous',{app:app.name});continue;}
       const found=candidates[0];
       if(found){
+        app.executable=found.ExecutablePath;
         if(app.name==='deepseek'){
           const hasHost=[...rows.values()].some(row=>row.ParentProcessId===found.ProcessId&&row.CommandLine?.includes('dsh-desktop-host'));
           if(!hasHost){
@@ -160,6 +164,7 @@ export class Supervisor {
         app.previousPid=app.pid;continue;
       }
       app.pid=null;
+      if(app.installedExecutable)app.executable=app.installedExecutable;
       if(app.previousPid&&!app.missingAt)app.missingAt=Date.now();
       if(app.missingAt&&Date.now()-app.missingAt<3000)continue;
       if(app.closedByUser||Date.now()<app.nextStart)continue;
@@ -185,13 +190,9 @@ export class Supervisor {
       let changed=false;
       for(const app of this.apps.values()){
         const executable=installedDesktopExecutable(app.name,packages);
-        if(!executable||!fs.existsSync(executable)||executable.toLowerCase()===app.executable.toLowerCase())continue;
-        record('desktop.installation_changed',{app:app.name,previous:app.executable,executable});
-        app.executable=executable;config.apps[app.name].executable=executable;changed=true;
-        // Refresh the adapter only; desktop sessions and in-flight model work stay alive.
-        const service=this.services.get(app.name);
-        service.pid??=read(path.join(ROOT,service.connection))?.pid;
-        if(service.pid&&rows.has(service.pid))await this.killService(service,rows,'desktop_installation_changed');
+        if(!executable||!fs.existsSync(executable)||executable.toLowerCase()===(app.installedExecutable??app.executable).toLowerCase())continue;
+        record('desktop.installation_changed',{app:app.name,previous:app.installedExecutable??app.executable,executable});
+        app.installedExecutable=executable;config.apps[app.name].executable=executable;changed=true;
       }
       if(changed)atomic(path.join(DIRECTORY,'config.json'),config);
     }catch(error){record('desktop.installation_refresh_failed',{error:error.message});}
@@ -202,17 +203,15 @@ export class Supervisor {
     try{
       for(const app of ['codex','claude','deepseek']){
         const service=this.services.get(app);if(!this.apps.get(app)?.pid||service.state!=='healthy'||Date.now()-service.startedAt<30000)continue;
+        const transition=coordinator.state().apps[app]?.transition;
+        if(transition?.phase==='waitingIdle'){try{await activateProfile(app,transition.to);}catch(error){service.nativeError=error.code??'ACTIVATION_DEFERRED';}continue;}
         try{await request(path.join(ROOT,service.connection),'/v1/threads?limit=1','GET',undefined,12000);this.nativeFailures[app]=0;}
         catch(error){
           const failures=++this.nativeFailures[app];record('native.probe_failed',{app,failures,error:error.message});
-          if(failures>=3){
-            const current=await snapshot();
-            if(app==='claude'){
-              try{await lifecycle('reload');record('native.claude_page_repair',{});}catch{}
-            }
-            if(service.pid&&current.has(service.pid))await this.killService(service,current,'native_transport_unavailable');
-            this.nativeFailures[app]=0;
-          }
+          service.nativeError=error.code??'TRANSPORT_UNAVAILABLE';
+          // Protocol/version failures are not repaired by restarting services or pages.
+          // Process/HTTP watchdog recovery remains independent of native compatibility.
+          if(failures>=3)record('native.repair_deferred',{app,code:service.nativeError,reason:'Use compatibility doctor/idle activation; no GUI refresh performed'});
         }
       }
     }finally{this.deepBusy=false;}

@@ -9,6 +9,7 @@ import {codexModelCatalog,resolveSelection,matchRegisteredCwd} from './collabora
 import policy from './execution-policy.cjs';
 import {registeredLocation} from './worktree-location.mjs';
 import {ensureExecution,executionRpc} from './codex-execution.mjs';
+import {withCapability,compatError} from './compatibility.mjs';
 
 const run = promisify(execFile);
 export const MAX_FRAME = 8 * 1024 * 1024;
@@ -122,17 +123,19 @@ export function unwrapTool(result) {
 }
 
 export class DesktopTools {
-  constructor(pipe, callerThread, {executionRuntime} = {}) {
+  constructor(pipe, callerThread, {executionRuntime,guardRuntime=withCapability} = {}) {
     if (!callerThread) throw new Error('Set --caller-thread or CODEX_THREAD_ID to the dispatcher chat ID');
     this.rpc = new PipeRpc(pipe);
     if (!pipe) this.rpc.resolvePath = discoverToolPipe;
     this.callerThread = callerThread;
     this.executionRuntime = executionRuntime ?? {ensureExecution,executionRpc};
+    this.guardRuntime=guardRuntime;
   }
-  async listTools() { return (await this.rpc.request('tools/list', { threadStartKind: 'all' })).tools; }
+  async listTools() { return this.guardRuntime('codex','read',async()=>{const value=await this.rpc.request('tools/list', { threadStartKind: 'all' });if(!Array.isArray(value.tools))throw compatError('CONTRACT_MISMATCH','Native tools/list contract changed');return value.tools;}); }
   async listModels(){const tool=(await this.listTools()).find(item=>item.name==='create_thread');return codexModelCatalog(tool?.inputSchema?.properties?.model?.description??'');}
   executionCapabilities(){const config=policy.readSettings();return {sandboxModes:['workspace-write','read-only','danger-full-access'],fullAccess:{sandboxMode:'danger-full-access',defaultApprovalPolicy:'never',writableRoots:'omit; full access is unrestricted'},permissionUpdates:'explicit; managed idle Codex threads only; pending approvals rejected',defaultSandboxMode:config.defaultSandboxMode??'workspace-write',approvalPolicies:['on-request','untrusted','never','on-failure'],allowedWritableRoots:config.allowedWritableRoots,executionPolicySettingsFile:policy.settingsFile(),executionPolicyPersistence:'per-thread; revalidated before every bridge wake',cwdPolicy:'registered-project-or-verified-git-worktree'};}
   async setPermissions(threadId,input){await this.checkExecutionReady();return this.executionRuntime.executionRpc('set_permissions',{threadId,policy:input});}
+  async preflightDispatch(input){await this.guardRuntime('codex','send',async()=>{});if(input.threadId&&this.isExecutionManaged(input.threadId))await this.checkExecutionReady();}
   isExecutionManaged(threadId){return !!policy.loadState().threads[threadId];}
   async prepareExecution(execution,{threadId}={}){
     if(threadId)return execution;
@@ -154,9 +157,12 @@ export class DesktopTools {
   }
   async checkExecutionReady(){
     try{return await this.executionRuntime.ensureExecution();}
-    catch(error){throw Object.assign(error,{status:503,code:'EXECUTION_PREFLIGHT_FAILED',dispatchNotStarted:true});}
+    catch(error){throw Object.assign(error,{status:503,code:error.code??'EXECUTION_PREFLIGHT_FAILED',dispatchNotStarted:true});}
   }
   async readSettings(threadId, hostId = 'local') {
+    return this.guardRuntime('codex','settings',()=>this.readSettingsGuarded(threadId,hostId));
+  }
+  async readSettingsGuarded(threadId, hostId = 'local') {
     if(policy.loadState().threads[threadId]){
       await ensureExecution();const native=await executionRpc('read',{threadId});if(!native.loaded)throw Object.assign(new Error('Native execution state is not loaded; wake this managed thread to restore it'),{status:503});
       return {settings:{model:native.model,reasoningEffort:native.reasoningEffort,cwd:native.cwd,sandboxMode:native.sandboxMode,writableRoots:native.writableRoots,approvalPolicy:native.approvalPolicy,permissionScope:native.permissionScope,nextTurnPermissions:native.nextTurnPermissions,executionSource:native.source},nativeExecution:native};
@@ -177,21 +183,32 @@ export class DesktopTools {
   async call(tool, args, timeoutMs = 45000) {
     if(tool==='create_thread'&&args.executionPolicy){
       await this.checkExecutionReady();const created=await this.executionRuntime.executionRpc('create',{args:{...args.executionPolicy,requestId:args.requestId,cwd:args.cwd,title:args.title,projectId:args.target.type==='project'?args.target.projectId:undefined,model:args.model,effort:args.thinking}});
+      try{
       const visible=await this.rawCall('read_thread',{threadId:created.threadId,hostId:'local',turnLimit:1});if(args.cwd&&path.resolve(visible.thread.cwd).toLowerCase()!==path.resolve(args.cwd).toLowerCase())throw new Error('Native cwd readback mismatch; first model turn was not dispatched');
       await this.executionRuntime.executionRpc('prepare',{threadId:created.threadId});
       await this.rawCall('send_message_to_thread',{threadId:created.threadId,hostId:'local',prompt:args.prompt,...args.model?{model:args.model}:{},...args.thinking?{thinking:args.thinking}:{}});
       return {threadId:created.threadId,hostId:'local',executionManaged:true};
+      }catch(error){throw Object.assign(error,{dispatchNotStarted:false,dispatchStage:'sent',createdThreadId:created.threadId});}
     }
     if(tool==='send_message_to_thread'&&policy.loadState().threads[args.threadId]){await this.checkExecutionReady();await this.executionRuntime.executionRpc('prepare',{threadId:args.threadId});}
     return this.rawCall(tool,args,timeoutMs);
   }
   async rawCall(tool,args,timeoutMs=45000){
+    if(!['list_projects','list_threads','list_archived_threads','read_thread','create_thread','send_message_to_thread'].includes(tool))throw compatError('CAPABILITY_UNSUPPORTED','Unknown native tool is not allowed by the bridge contract');
+    const capability=['create_thread','send_message_to_thread'].includes(tool)?'send':'read';
+    return this.guardRuntime('codex',capability,async selection=>{
+    if(this.nativeGeneration&&this.nativeGeneration!==selection.binding?.generation){this.rpc.close();this.settingsRpc?.close();this.nativeSchema=null;}
+    this.nativeGeneration=selection.binding?.generation;
+    if(capability==='send'&&this.nativeSchema!==selection.binding?.activationEpoch){const declaration=await this.rpc.request('tools/list',{threadStartKind:'all'});if(!Array.isArray(declaration.tools)||!declaration.tools.some(item=>item.name===tool&&item.inputSchema?.type==='object'))throw compatError('CONTRACT_MISMATCH','Native write-tool schema is unavailable');this.nativeSchema=selection.binding?.activationEpoch;}
     const result = await this.rpc.request('tools/call', {
       callerSource: 'codex', namespace: 'codex_app', hostId: 'local',
       threadId: this.callerThread, turnId: 'external-gui-bridge', callId: crypto.randomUUID(),
       tool, arguments: args,
     }, timeoutMs);
-    return unwrapTool(result);
+    const value=unwrapTool(result);
+    if(tool==='read_thread'&&(!value.thread||!Array.isArray(value.turns)))throw compatError('CONTRACT_MISMATCH','Native read_thread response changed');
+    return value;
+    });
   }
   close() { this.rpc.close(); this.settingsRpc?.close(); }
 }

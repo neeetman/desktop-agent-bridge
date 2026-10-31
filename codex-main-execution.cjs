@@ -1,12 +1,14 @@
-function install(root){
+function install(root,config={}){
  if(process.type!=='browser')return JSON.stringify({installed:false});const req=process.mainModule.require.bind(process.mainModule);if(!req('node:worker_threads').isMainThread)return JSON.stringify({installed:false});
  const fs=req('node:fs'),path=req('node:path'),net=req('node:net'),crypto=req('node:crypto'),inspector=req('node:inspector'),{app}=req('electron');
- const manifest=JSON.parse(fs.readFileSync(path.join(root,'codex-execution-compatibility.json'),'utf8'));
- if(globalThis.__codexExecutionBridge?.revision===manifest.helperRevision&&globalThis.__codexExecutionBridge.server.listening)return JSON.stringify({installed:true,reused:true,pid:process.pid});
+ const adapterRoot=config.adapterRoot??root,manifest=config.manifest??JSON.parse(fs.readFileSync(path.join(root,'codex-execution-compatibility.json'),'utf8'));
+ const guard=config.binding?req(path.join(adapterRoot,'helper-binding.cjs')).createGuard(root,'codex',config.binding):null;
+ const reused=guard?guard.replacement(globalThis.__codexExecutionBridge):globalThis.__codexExecutionBridge?.revision===manifest.helperRevision;
+ if(reused&&globalThis.__codexExecutionBridge.server.listening)return JSON.stringify({installed:true,reused:true,pid:process.pid});
  if(globalThis.__codexExecutionBridge?.busy)return JSON.stringify({installed:false,reason:'execution bridge busy'});
- globalThis.__codexExecutionBridge?.dispose?.();globalThis.__codexExecutionBridge?.server.close();delete req('node:module')._cache[path.join(root,'execution-policy.cjs')];
- const policy=req(path.join(root,'execution-policy.cjs')),token=JSON.parse(fs.readFileSync(path.join(root,'runtime/connection.json'),'utf8')).token;
- const api={busy:0,revision:manifest.helperRevision},managed=new Set(Object.keys(policy.loadState().threads)),audits=new Map(),disposers=[];api.dispose=()=>disposers.splice(0).forEach(fn=>fn());let creationTail=Promise.resolve();
+ globalThis.__codexExecutionBridge?.dispose?.();globalThis.__codexExecutionBridge?.server.close();delete req('node:module')._cache[path.join(adapterRoot,'execution-policy.cjs')];
+ const policy=req(path.join(adapterRoot,'execution-policy.cjs')),token=JSON.parse(fs.readFileSync(path.join(root,'runtime/connection.json'),'utf8')).token;
+ const api={busy:0,binding:config.binding,revision:manifest.helperRevision},managed=new Set(Object.keys(policy.loadState().threads)),audits=new Map(),disposers=[];api.dispose=()=>disposers.splice(0).forEach(fn=>fn());let creationTail=Promise.resolve();
  function observe(id,c,approval=false){if(!managed.has(id))return;const a=audits.get(id)??{startedAt:new Date().toISOString(),observations:0,approvalRequestEvents:0,waitingOnApprovalEvents:0,statuses:[]};a.observations++;if(approval)a.approvalRequestEvents++;const status=c?.threadRuntimeStatus;if(status){const key=JSON.stringify(status);if(!a.statuses.includes(key))a.statuses.push(key);if(/waitingOnApproval/i.test(key))a.waitingOnApprovalEvents++;}audits.set(id,a);}
  let managerPromise;
  async function manager(){
@@ -14,7 +16,7 @@ function install(root){
   if(managerPromise)return managerPromise;
   managerPromise=(async()=>{const session=new inspector.Session();session.connect();const post=(m,p)=>new Promise((r,j)=>session.post(m,p,(e,v)=>e?j(e):r(v)));
    try{
-    const ctor=await req(path.join(root,'codex-runtime.cjs')).connectionConstructor(manifest);globalThis.__codexExecutionPrototype=ctor.prototype;
+    const ctor=await req(path.join(adapterRoot,'codex-runtime.cjs')).connectionConstructor(manifest);globalThis.__codexExecutionPrototype=ctor.prototype;
     const proto=await post('Runtime.evaluate',{expression:'globalThis.__codexExecutionPrototype'}),objects=await post('Runtime.queryObjects',{prototypeObjectId:proto.result.objectId});
     await post('Runtime.callFunctionOn',{objectId:objects.objects.objectId,functionDeclaration:'function(){globalThis.__codexExecutionConnection=this.find(x=>x.options?.hostId==="local"&&!x.disposed&&x.connectionState==="connected");return true}',returnByValue:true});
     const fn=await post('Runtime.evaluate',{expression:'globalThis.__codexExecutionConnection.options.getStatsigEvaluations'}),props=await post('Runtime.getProperties',{objectId:fn.result.objectId,ownProperties:false}),scopes=props.internalProperties.find(x=>x.name==='[[Scopes]]'),list=await post('Runtime.getProperties',{objectId:scopes.value.objectId,ownProperties:true});
@@ -71,7 +73,9 @@ function install(root){
  }
  const server=net.createServer(socket=>{let data='',handled=false;socket.setTimeout(90000,()=>socket.destroy());socket.on('error',()=>{});socket.on('data',async chunk=>{if(handled)return;data+=chunk.toString('utf8');if(data.length>1024*1024)return socket.destroy();const index=data.indexOf('\n');if(index<0)return;handled=true;
   const reply=value=>{if(!socket.destroyed)socket.end(JSON.stringify(value)+'\n');};try{const r=JSON.parse(data.slice(0,index));if(r.token!==token)return reply({error:'Unauthorized',status:401});
-   if(r.method==='status')return reply({pid:process.pid,desktopVersion:app.getVersion(),desktopPackageVersion:manifest.version,revision:api.revision,ready:!!await manager(),policyFile:policy.settingsFile()});
+   if(r.method==='status')return reply({pid:process.pid,binding:api.binding,desktopVersion:app.getVersion(),desktopPackageVersion:manifest.version,revision:api.revision,ready:!!await manager(),policyFile:policy.settingsFile()});
+   guard?.check(r,{probe:r.method==='maintenance'});
+   if(r.method==='maintenance'){const m=await manager(),loaded=await req(path.join(adapterRoot,'helper-binding.cjs')).loadedThreadIds(globalThis.__codexExecutionConnection);for(const id of loaded){const thread=(await m.readThread(id,{includeTurns:false})).thread;if(thread?.status?.type!=='idle'||m.getThreadExecutionState(id)?.inProgress||m.getConversation(id)?.requests?.length)return reply({authoritative:true,idle:false,binding:api.binding});}return reply({authoritative:true,idle:api.busy===0,binding:api.binding});}
    if(r.method==='read')return reply(await snapshot(r.threadId));if(r.method==='create'){api.busy++;try{const operation=creationTail.then(()=>create(r.args));creationTail=operation.catch(()=>{});return reply(await operation);}finally{api.busy--;}}
    if(['prepare','set_permissions'].includes(r.method)){api.busy++;try{const operation=creationTail.then(()=>r.method==='prepare'?prepare(r.threadId):setPermissions(r.threadId,r.policy));creationTail=operation.catch(()=>{});return reply(await operation);}finally{api.busy--;}}throw Error('Unsupported execution method');
   }catch(e){reply({error:e.message,status:e.status??500,code:e.code});}

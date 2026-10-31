@@ -7,6 +7,7 @@ import { DesktopTools, PipeRpc } from './native.mjs';
 import { normalizeExecution, nativeModelArgs, queryThreads, EFFORTS, canonicalJson } from './contracts.mjs';
 import { Signals } from './signals.mjs';
 import {publicResult,errorData} from './collaboration.mjs';
+import {coordinator} from './compatibility.mjs';
 
 const terminal = new Set(['completed', 'failed', 'interrupted', 'attention']);
 const active = new Set(['prepared', 'dispatching', 'running', 'unknown', 'awaiting_decision', 'resuming']);
@@ -174,6 +175,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
       if (dispatching.has(record.taskId)) await dispatching.get(record.taskId);
       return {...state.tasks[record.taskId],cachedResult:true};
     }
+    if(tools.preflightDispatch)await tools.preflightDispatch(input);
     if(tools.prepareExecution)execution=await tools.prepareExecution(execution,{threadId:input.threadId});
     else if(execution.cwd)throw fail(400, 'This backend cannot safely create a session at an arbitrary cwd');
     // Another identical caller may have reserved its task during asynchronous preflight.
@@ -214,6 +216,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         emit('task.dispatched', { taskId: task.id, threadId: task.threadId, hostId: task.hostId });
         save();
       } catch (error) {
+        if(error.createdThreadId&&!task.threadId)task.threadId=error.createdThreadId;
         task.status = task.status === 'dispatching'&&!error.dispatchNotStarted ? 'unknown' : 'failed';
         if(error.dispatchNotStarted)task.dispatchOutcome='not-started';
         task.errorCode=error.code;task.errorStatus=error.status;
@@ -284,8 +287,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         const data = await body(req);
         return json(res, 202, signals.receive(data, token, root));
       }
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.2.0', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
-      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.7.0', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.0', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
+      if (req.method === 'GET' && url.pathname === '/v1/compatibility') return json(res,200,await coordinator.doctor(state.provider==='claude'?'claude':'codex'));
+      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.0', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
       if (tools.provider === 'deepseek' && url.pathname === '/v1/workspaces') {
         if (req.method === 'GET') return json(res, 200, await tools.call('list_workspaces', {}));
         if (req.method === 'POST') { const input = await body(req); nonempty(input.path, 'path'); const result = await tools.call('create_workspace', input); return json(res, result.created ? 201 : 200, result); }
@@ -356,7 +360,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         return;
       }
       throw fail(404, 'Unknown endpoint');
-    } catch (error) { if (!res.headersSent) {const details=errorData(error,502);json(res,details.httpStatus,{error:details.message,code:details.code,httpStatus:details.httpStatus});} else res.end(); }
+    } catch (error) { if (!res.headersSent) {const details=errorData(error,502);json(res,details.httpStatus,{...details,error:details.message});} else res.end(); }
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;

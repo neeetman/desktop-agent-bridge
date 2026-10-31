@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 from pathlib import Path
 
 
@@ -51,6 +52,18 @@ def initialize(root, home, writable_roots=(), protected_threads=()):
 
 
 def check_compatibility(root, codex_executable, claude_executable):
+    if (root / 'compat/catalog.json').exists():
+        files = []
+        for app, executable in [('codex', codex_executable), ('claude', claude_executable)]:
+            result = subprocess.run(['node', str(root / 'compat-service.mjs'), 'check-build'],
+                                    input=json.dumps({'app': app, 'executable': str(executable)}),
+                                    capture_output=True, text=True, timeout=30,
+                                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+            value = json.loads(result.stdout)
+            if result.returncode or value.get('error'):
+                raise ValueError(value.get('error', 'Compatibility coordinator failed'))
+            files.append(value)
+        return {'validated': True, 'attached': False, 'apps': files}
     files = []
     for name, executable, manifest_names in (
         ('codex', codex_executable, ('codex-execution-compatibility.json', 'codex-mcp-compatibility.json')),

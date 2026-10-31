@@ -1,18 +1,19 @@
-function install(root) {
+function install(root,configBinding={}) {
   if (process.type !== 'browser') return JSON.stringify({ installed: false });
   const req = process.mainModule.require.bind(process.mainModule);
   if (!req('node:worker_threads').isMainThread) return JSON.stringify({ installed: false });
   const fs = req('node:fs'), path = req('node:path'), net = req('node:net'), crypto = req('node:crypto');
   const { app } = req('electron');
-  const compatibility = JSON.parse(fs.readFileSync(path.join(root, 'codex-mcp-compatibility.json'), 'utf8'));
-  if(globalThis.__codexBridgeMcp?.state?.helperRevision===compatibility.helperRevision)return JSON.stringify({installed:true,reused:true,pid:process.pid});
+  const adapterRoot=configBinding.adapterRoot??root,compatibility = configBinding.manifest??JSON.parse(fs.readFileSync(path.join(root, 'codex-mcp-compatibility.json'), 'utf8'));
+  const guard=configBinding.binding?req(path.join(adapterRoot,'helper-binding.cjs')).createGuard(root,'codex',configBinding.binding):null;
+  if(guard?guard.replacement(globalThis.__codexBridgeMcp):globalThis.__codexBridgeMcp?.state?.helperRevision===compatibility.helperRevision)return JSON.stringify({installed:true,reused:true,pid:process.pid});
   if(globalThis.__codexBridgeMcp?.state?.refreshing)return JSON.stringify({installed:false,reason:'MCP reload is in progress'});
   if(globalThis.__codexBridgeMcp&&!globalThis.__codexBridgeMcp.dispose)throw Error('Existing legacy helper cannot be safely replaced in place');
   globalThis.__codexBridgeMcp?.dispose();
-  const runtime = req(path.join(root,'codex-runtime.cjs'));
+  const runtime = req(path.join(adapterRoot,'codex-runtime.cjs'));
   const directory = path.join(root, 'runtime/codex-mcp'); fs.mkdirSync(directory, { recursive: true });
   const token = JSON.parse(fs.readFileSync(path.join(root, 'runtime/connection.json'), 'utf8')).token;
-  const state = { pid: process.pid, helperRevision:compatibility.helperRevision,desktopPackageVersion:compatibility.version,installedAt: new Date().toISOString(), state: 'finding_connection', reloads: 0 };
+  const state = { pid: process.pid,binding:configBinding.binding, helperRevision:compatibility.helperRevision,desktopPackageVersion:compatibility.version,installedAt: new Date().toISOString(), state: 'finding_connection', reloads: 0 };
   const persist = () => fs.writeFileSync(path.join(directory, 'native-state.json'), JSON.stringify(state, null, 2));
   let connection, refreshing, lastFingerprint, debounce;
   const config = path.join(process.env.CODEX_HOME || app.getPath('home') + '/.codex', 'config.toml');
@@ -35,11 +36,13 @@ function install(root) {
   }
   async function reload(reason = 'requested') {
     if (refreshing) return refreshing;
+    if(guard)guard.check({binding:configBinding.binding,expiresAt:Date.now()+60000});
     let protection;try{protection=JSON.parse(fs.readFileSync(path.join(root,'runtime/router/protected-threads.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
-    const block=runtime.reloadBlockReason(protection);if(block){state.reloadDeferred=block;persist();throw new Error(block);}
+    const block=runtime.reloadBlockReason(protection);if(block){state.reloadDeferred=block;persist();throw Object.assign(new Error(block),{code:'REFRESH_DEFERRED_PROTECTED',status:503});}
     state.refreshing=true;
     refreshing = (async () => {
       const connection = await findConnection();
+      if(guard){const loaded=await req(path.join(adapterRoot,'helper-binding.cjs')).loadedThreadIds(connection);for(const threadId of loaded){if(typeof threadId!=='string')throw Error('Loaded thread ID is invalid');const result=await connection.sendAppServerRequest('thread/read',{threadId,includeTurns:false});if(result.thread?.status?.type!=='idle')throw Object.assign(Error('Global MCP refresh is deferred while a thread is busy or awaiting approval'),{code:'REFRESH_DEFERRED_BUSY',status:503});}}
       await connection.sendAppServerRequest('config/mcpServer/reload', undefined);
       state.reloads++; state.lastReloadAt = new Date().toISOString(); state.lastReloadReason = reason; state.lastError = null;
       lastFingerprint = fingerprint(); persist(); return { queued: true, ...state };
@@ -58,7 +61,8 @@ function install(root) {
       const reply = value => { if (!socket.destroyed) socket.end(JSON.stringify(value) + '\n'); };
       if (request.token !== token) return reply({ error: 'Unauthorized' });
       try {
-        if (request.method === 'status') return reply(state);
+        if (request.method === 'status'){try{await findConnection();}catch(error){state.lastError=error.message;persist();}return reply(state);}
+        guard?.check(request,{probe:request.method==='servers'});
         if (request.method === 'reload') return reply(await reload('external_request'));
         const current = await findConnection();
         if (request.method === 'servers') return reply(await current.sendAppServerRequest('mcpServerStatus/list', { threadId: request.threadId, serverName: 'desktop-bridge', detail: 'toolsAndAuthOnly', limit: 20 }));
@@ -67,7 +71,7 @@ function install(root) {
           return reply(await current.sendAppServerRequest('mcpServer/tool/call', { threadId: request.threadId, server: 'desktop-bridge', tool: request.tool, arguments: request.arguments ?? {}, _meta: { threadId: request.threadId, thread_id: request.threadId } }));
         }
         throw new Error('Unsupported MCP lifecycle operation');
-      } catch (error) { reply({ error: error.message }); }
+      } catch (error) { reply({ error: error.message,code:error.code,status:error.status }); }
     });
   });
   server.on('error', error => { state.lastError = error.message; persist(); });
