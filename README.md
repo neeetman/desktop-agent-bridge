@@ -53,6 +53,7 @@ Frida 固定为 `17.9.1`。未知 Codex/Claude 文件哈希会拒绝附着；不
 - [部署、验证与卸载](docs/deployment.md)
 - [从旧实验目录迁移](docs/migration.md)
 - [架构与源码入口](docs/architecture.md)
+- [Claude / Codex 更新适配方案（待实现）](docs/update-resilience.md)
 - [本次验证范围](docs/validation.md)
 
 运行数据、凭证、配置备份和日志位于 `runtime/`；权限白名单及托管线程策略位于 `%USERPROFILE%\.desktop-session-bridge\`。这些数据不进 Git。跨机器部署时重新生成，不复制旧机器的 token、会话 ID 或线程策略。
