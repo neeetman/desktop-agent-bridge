@@ -1,0 +1,11 @@
+{
+  "version": "26.1027.3384.0",
+  "executableSha256": "d8b9c500c4dc0fa2fd5a8a3a5592cd637c2a9e625a191d8733a0b7aa8143b11b",
+  "chromeSha256": "f66d0d4e578dc848dd0666bfa80063ea21402cc6155270316491656f26c3839d",
+  "asarSha256": "6fbedf054a8d8cafaf5c745b40aa59176512e106e0bd6308275ae123b60fd074",
+  "connectionModule": ".vite/build/early-bootstrap-339-096ec1020e8592e0.js",
+  "connectionModuleId": 67295,
+  "managerClass": "_X",
+  "managerModuleId": 83678,
+  "helperRevision": "72f218bda274a38f"
+}

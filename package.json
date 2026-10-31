@@ -1,0 +1,16 @@
+{
+  "name": "desktop-agent-bridge",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Windows desktop agent messaging, replies, decisions and session control for Codex, Claude and DeepSeek Harness",
+  "engines": {"node": ">=24"},
+  "scripts": {
+    "test": "node --test *.test.mjs",
+    "test:python": "python -m unittest discover -p *_test.py",
+    "status": "node supervisor-status.mjs",
+    "check": "node check-source.mjs"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  }
+}

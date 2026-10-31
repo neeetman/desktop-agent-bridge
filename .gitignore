@@ -1,0 +1,13 @@
+runtime/
+archive/
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+*.log
+app-inspect/
+claude-inspect/
+deepseek-inspect/

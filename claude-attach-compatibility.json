@@ -1,0 +1,8 @@
+{
+  "desktopVersion": "4.29.0",
+  "executableSha256": "baa1dec1146dc4e11ed1c0456d6817e6eb44b87256fe0e367a9124dedac3f5e6",
+  "asarSha256": "bef5dfbee42e64ec683ccfe8aaffd8518e99b7277a165202033d696c99e7d2b2",
+  "fridaVersion": "17.9.1",
+  "sessionModule": ".vite/build/index.chunk-B5N0558G.js",
+  "transport": "main-renderer-rpc"
+}
