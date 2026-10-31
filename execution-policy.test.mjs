@@ -63,6 +63,6 @@ test('cwd accepts only a registered directory or a real worktree with the same g
   assert.equal((await registeredLocation(projects,wt,'p')).isWorktree,true);
   await assert.rejects(registeredLocation(projects,other),{code:'CWD_NOT_REGISTERED'});
   await assert.rejects(registeredLocation(projects,wt,'different-project'),{code:'CWD_NOT_REGISTERED'});
-  await assert.rejects(registeredLocation(projects,wt,'p',async args=>args.includes('worktree')?`worktree ${wt}\0\0`:args[1]===repo?repo:other),{code:'CWD_NOT_REGISTERED'});
+  await assert.rejects(registeredLocation(projects,wt,'p',async args=>args.includes('worktree')?`worktree ${wt}\0\0`:fs.realpathSync.native(args[1])===fs.realpathSync.native(repo)?repo:other),{code:'CWD_NOT_REGISTERED'});
  }finally{try{git(['-C',repo,'worktree','remove','--force',wt]);}catch{}assert.equal(path.dirname(base),path.resolve(os.tmpdir()));fs.rmSync(base,{recursive:true,force:true});}
 });

@@ -4,6 +4,7 @@ import {publicResult,codexModelCatalog,resolveSelection,matchRegisteredCwd,error
 import {normalizeExecution} from './contracts.mjs';
 import {callPeerTool} from './peer-call.mjs';
 import {DesktopTools} from './native.mjs';
+import executionPolicy from './execution-policy.cjs';
 import {startRouter} from './peer-router.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -33,7 +34,9 @@ test('cwd must exactly match the selected native project and cannot fall back to
   assert.throws(()=>matchRegisteredCwd(projects,'D:/UECapture-work/wt/test','main'),/not an exactly matching/);
   assert.throws(()=>normalizeExecution({threadId:'active-chat',cwd:'D:/UECapture'}),/keeps/);
 });
-test('Codex rejects unregistered cwd before any create or settings mutation',async()=>{
+test('Codex rejects unregistered cwd before any create or settings mutation',async context=>{
+  const validate=executionPolicy.validate;
+  context.mock.method(executionPolicy,'validate',input=>validate(input,{allowedWritableRoots:[]}));
   const tools=new DesktopTools('test','caller'),calls=[];
   tools.call=async name=>{calls.push(name);return {projects:[]};};
   await assert.rejects(tools.prepareExecution({cwd:process.cwd(),target:{type:'projectless'}}),/no session was created/);
