@@ -1,6 +1,6 @@
 # Desktop Agent Bridge
 
-Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.0**，MIT 许可证。npm 包名为 `@neeetman/desktop-agent-bridge`；当前尚未正式发布。
+Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.0**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。
 
 会话可以通过 MCP 主动互发消息、接收回复、请求决策，并在答复到达时唤醒原会话。支持按标题搜索后用精确 ID 路由、多会话队列、项目/工作区、模型与 effort 读回，以及 Codex 托管会话的下一轮权限设置。
 

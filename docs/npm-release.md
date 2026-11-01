@@ -2,7 +2,7 @@
 
 包名：`@neeetman/desktop-agent-bridge`，版本 0.8.0，MIT。无 scope 的同名包属于已有 npm 登记，不能作为本项目的新包名。scope 的实际发布权限由 npm 账户决定，与 GitHub 登录分别管理。
 
-当前机器未登录 npm，尚未执行正式发布。源码配置已允许公开发布，提供 desktop-agent-bridge CLI，并用显式 files 清单排除 runtime、凭证、日志、测试、安装包摘录和 node_modules。安装本 npm 包不会自动修改 MCP/启动桌面应用；install 是明确的独立命令。
+发布使用维护者的 npm 身份。源码配置允许公开发布，提供 desktop-agent-bridge CLI，并用显式 files 清单排除 runtime、凭证、日志、测试、安装包摘录和 node_modules。安装本 npm 包不会自动修改 MCP/启动桌面应用；install 是明确的独立命令。
 
 维护者在终端完成认证，确认拥有 @neeetman scope 权限，再执行：
 
