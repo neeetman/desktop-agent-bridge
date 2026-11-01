@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Debounce health alerts until three consecutive failures spanning at least 60 seconds; retain confirmed state across router restarts.
+- Coalesce per-app probes, save healthy peer results independently, and return pending status within 2.5 seconds when a native read is slow.
+- Record service/native step budgets, elapsed time, error codes, and periodic diagnostic samples without retrying native writes.
+- Document source-checkout deployment and the idle maintenance window required to migrate an existing v0.7 installation.
+
 ## 0.8.1 — 2026-11-01
 
 - Organize runtime code by subsystem under `src/`, platform helpers under `scripts/`, and tests under `tests/`.

@@ -14,9 +14,10 @@ function fixture() {
     if (route.startsWith('/v1/tasks/')) return { status: taskStatus, result: 'PEER_ACK',turnId:nativeTurn };
     return { thread: { status: { type: busy ? 'active' : 'idle' } },turns:nativeTurn?[{id:nativeTurn,status:'inProgress'}]:[] };
   };
-  const router = new PeerRouter({ directory, backendRequest, pollMs: 1e9 });
+  let healthNow=Date.parse('2026-11-01T00:00:00Z');
+  const router = new PeerRouter({ directory, backendRequest, pollMs: 1e9, healthOptions:{now:()=>healthNow} });
   const tick = router.tick.bind(router); router.tick = async () => {};
-  return { router, tick, sends, backendRequest, directory, setBusy(value) { busy = value; }, setUnknown(value) { unknown = value; },setTask(value){taskStatus=value;},setTurn(value){nativeTurn=value;}, close() { router.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
+  return { router, tick, sends, backendRequest, directory, advanceHealth(){healthNow+=30000;}, setBusy(value) { busy = value; }, setUnknown(value) { unknown = value; },setTask(value){taskStatus=value;},setTurn(value){nativeTurn=value;}, close() { router.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
 }
 const from = { app: 'codex', threadId: 'c' }, to = { app: 'claude', threadId: 'a' };
 
@@ -130,7 +131,7 @@ test('health returns native probe failures with a previous success and repair hi
   const f=fixture();try{
     const first=await f.router.health('codex');assert.equal(first.results[0].ok,true);
     f.router.backendRequest=async()=>{throw Error('missing desktop pipe');};
-    const second=await f.router.health('codex');assert.equal(second.results[0].ok,false);assert.equal(second.results[0].lastSuccessAt,first.results[0].lastSuccessAt);assert.match(second.results[0].repair,/start.ps1/);
+    f.advanceHealth();const second=await f.router.health('codex');assert.equal(second.results[0].ok,false);assert.equal(second.results[0].lastSuccessAt,first.results[0].lastSuccessAt);assert.match(second.results[0].repair,/Transient/);assert.equal(second.results[0].failedStep,'service_http');
   }finally{f.close();}
 });
 test('health subscriptions notify once per transition, persist baseline, and skip protected chats',async()=>{
@@ -138,10 +139,10 @@ test('health subscriptions notify once per transition, persist baseline, and ski
     f.router.state.healthSubscribers={one:{who:from},protected:{who:{app:'codex',threadId:'protected'}}};
     fs.writeFileSync(path.join(f.directory,'protected-threads.json'),JSON.stringify({threadIds:['protected']}));
     await f.router.health('codex');f.router.backendRequest=async()=>{throw Error('offline');};
-    await f.router.health('codex');await f.router.health('codex');
+    for(let i=0;i<3;i++){f.advanceHealth();await f.router.health('codex');}await f.router.health('codex');
     assert.equal(f.router.receive(from).messages.length,1);assert.equal(f.router.receive(from).messages[0].expectReply,false);
     assert.equal(f.router.receive({app:'codex',threadId:'protected'}).messages.length,0);
-    f.router.backendRequest=f.backendRequest;await f.router.health('codex');assert.equal(f.router.receive(from).messages.length,2);
+    f.router.backendRequest=f.backendRequest;f.advanceHealth();await f.router.health('codex');assert.equal(f.router.receive(from).messages.length,2);
     const restored=new PeerRouter({directory:f.directory,backendRequest:f.backendRequest,pollMs:1e9});
     try{await restored.health('codex');assert.equal(restored.receive(from).messages.length,2);}finally{restored.close();}
   }finally{f.close();}

@@ -68,6 +68,7 @@
     "uninstall-autostart.ps1": "scripts/uninstall-autostart.ps1",
     "requirements-claude.txt": "requirements.txt",
     "AUTOSTART.md": "docs/autostart.md",
-    "PEER-MCP.md": "docs/peer-mcp.md"
+    "PEER-MCP.md": "docs/peer-mcp.md",
+    "health-monitor.mjs": "src/mcp/health-monitor.mjs"
   }
 }

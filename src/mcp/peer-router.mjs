@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../core/contracts.mjs';
 import {publicResult,bridgeHeader,errorData} from '../core/collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
+import {HealthMonitor} from './health-monitor.mjs';
 
 const ROOT = fileURLToPath(projectURL(''));
 const bad = (status, message) => Object.assign(new Error(message), { status });
@@ -17,20 +18,21 @@ const equal = (a, b) => a.app === b.app && a.threadId === b.threadId;
 const atomic = (file, value) => { const temporary = `${file}.tmp`; fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 }); fs.renameSync(temporary, file); };
 
 export class PeerRouter {
-  constructor({ directory = sourcePath(ROOT, 'runtime/router'), backendRequest, pollMs = 1000 } = {}) {
+  constructor({ directory = sourcePath(ROOT, 'runtime/router'), backendRequest, pollMs = 1000, healthOptions = {} } = {}) {
     this.directory = directory; fs.mkdirSync(directory, { recursive: true });
     this.stateFile = path.join(directory, 'state.json');
     this.state = fs.existsSync(this.stateFile) ? JSON.parse(fs.readFileSync(this.stateFile)) : { version: 1, token: crypto.randomBytes(32).toString('hex'), messages: {}, jobs: {}, decisions: {}, keys: {} };
     this.backendRequest = backendRequest ?? this.nativeRequest.bind(this);
     this.busy = new Set(); this.ticking = false; this.replyLocks=new Map();this.state.health??={};this.state.healthSubscribers??={};
-    this.healthReported=Object.fromEntries(Object.entries(this.state.health).map(([app,row])=>[app,row.ok]));
+    this.healthLogAt=new Map();
+    this.healthMonitor=new HealthMonitor({...healthOptions,initial:this.state.health,request:(...args)=>this.backendRequest(...args),onResult:(row,transition)=>this.recordHealth(row,transition)});
     this.timer = setInterval(() => void this.tick(), pollMs); this.timer.unref(); this.save();
   }
   save() { atomic(this.stateFile, this.state); }
-  async nativeRequest(app, route, method = 'GET', body, key) {
+  async nativeRequest(app, route, method = 'GET', body, key, options = {}) {
     const file = sourcePath(ROOT, { codex: 'runtime/connection.json', claude: 'runtime/claude/connection.json', deepseek: 'runtime/deepseek/connection.json' }[app] ?? 'invalid-app');
     const connection = JSON.parse(fs.readFileSync(file));
-    const response = await fetch(connection.baseUrl + route, { method, headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(65000) });
+    const response = await fetch(connection.baseUrl + route, { method, headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: options.signal ?? AbortSignal.timeout(options.timeoutMs ?? 65000) });
     const result = await response.json(); if (!response.ok) throw Object.assign(bad(response.status,typeof result.error==='string'?result.error:JSON.stringify(result)),{code:result.code,dispatchNotStarted:result.dispatchNotStarted,dispatchStage:result.dispatchStage}); return result;
   }
   async validate(who) { address(who);try{await this.backendRequest(who.app, `/v1/threads/${encodeURIComponent(who.threadId)}/settings`);}catch{await this.backendRequest(who.app,`/v1/threads/${encodeURIComponent(who.threadId)}`);} }
@@ -205,31 +207,32 @@ export class PeerRouter {
   }
   async health(app){
     const apps=app&&app!=='all'?[app]:['codex','claude','deepseek'];
-    const results=await Promise.all(apps.map(async app=>{
-      const previous=this.state.health[app]??{},checkedAt=new Date().toISOString();
-      const file={codex:'codex-mcp-compatibility.json',claude:'claude-attach-compatibility.json'}[app];let version=null;try{const m=JSON.parse(fs.readFileSync(sourcePath(ROOT,file)));version=m.version??m.desktopVersion;}catch{}
-      try{const service=await this.backendRequest(app,'/health');await this.backendRequest(app,'/v1/threads?limit=1');return this.state.health[app]={app,ok:true,checkedAt,lastSuccessAt:checkedAt,validatedDesktopVersion:version,transport:service.transport};}
-      catch(error){return this.state.health[app]={app,ok:false,checkedAt,lastSuccessAt:previous.lastSuccessAt??null,validatedDesktopVersion:version,error:error.message,repair:`Run ${app==='codex'?'start.ps1':app==='claude'?'start-claude.ps1':'supervisor-status.mjs status'} from the bridge directory; check compatibility manifest after desktop upgrades.`};}
-    }));
-    for(const result of results){
-      const previous=this.healthReported?.[result.app];this.healthReported??={};this.healthReported[result.app]=result.ok;
-      if(previous===undefined||previous===result.ok)continue;
+    return this.healthMonitor.check(apps);
+  }
+  recordHealth(result,transition){
+    const file={codex:'codex-mcp-compatibility.json',claude:'claude-attach-compatibility.json'}[result.app];let version=null;try{const m=JSON.parse(fs.readFileSync(sourcePath(ROOT,file)));version=m.version??m.desktopVersion;}catch{}
+    result.validatedDesktopVersion=version;
+    if(!result.ok||transition||Date.now()-(this.healthLogAt.get(result.app)??0)>=300000){
+      fs.appendFileSync(path.join(this.directory,'health-probes.jsonl'),JSON.stringify({event:'health_probe',...result,transition})+'\n',{mode:0o600});this.healthLogAt.set(result.app,Date.now());
+    }
+    if(transition){
       for(const subscriber of Object.values(this.state.healthSubscribers)){
         if(subscriber.apps&&!subscriber.apps.includes(result.app))continue;
         let protectedThreads=[];try{protectedThreads=JSON.parse(fs.readFileSync(path.join(this.directory,'protected-threads.json'))).threadIds??[];}catch{}
         if(protectedThreads.includes(subscriber.who.threadId))continue;
-        const id=crypto.randomUUID(),text=`桌面桥接健康状态：${result.app} ${result.ok?'已恢复':'原生连接失败'}。${result.error??''} ${result.repair??''} 请用 bridge_health 查看详情。这是健康通知，不要求回复。`;
+        const detail=transition==='failure'?`${result.failedStep}，本次 ${result.elapsedMs}ms，连续 ${result.consecutiveFailures} 次失败，${result.errorCode}：${result.error}`:`本次 ${result.elapsedMs}ms，上次故障步骤 ${result.lastFailure?.step??'unknown'}，已清除 ${result.recoveredFailures} 次连续失败`;
+        const id=crypto.randomUUID(),text=`桌面桥接健康状态：${result.app} ${transition==='recovery'?'已恢复':'持续探测失败'}。${detail}。${result.repair??''} 请用 bridge_health 查看详情。这是健康通知，不要求回复。`;
         this.state.messages[id]={id,kind:'health',from:{app:'bridge',threadId:'health-monitor'},to:subscriber.who,text,expectReply:false,status:'queued',createdAt:new Date().toISOString(),expiresAt:Date.now()+3600000,consumption:{status:'unconfirmed',turnId:null},protocolVersion:2};
         this.state.jobs[id]={id,status:'queued'};
       }
     }
-    this.save();return {ok:results.every(row=>row.ok),results};
+    this.save();
   }
-  close() { clearInterval(this.timer);clearInterval(this.healthTimer);clearInterval(this.maintenanceTimer); }
+  close() { clearInterval(this.timer);clearInterval(this.healthTimer);clearInterval(this.maintenanceTimer);this.healthMonitor.close(); }
 }
 
-export async function startRouter({ directory, port = 43130, backendRequest } = {}) {
-  const router = new PeerRouter({ directory, backendRequest });
+export async function startRouter({ directory, port = 43130, backendRequest, healthOptions } = {}) {
+  const router = new PeerRouter({ directory, backendRequest, healthOptions });
   const server = http.createServer(async (request, response) => {
     const reply = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(publicResult(body))); };
     try {
@@ -275,7 +278,7 @@ export async function startRouter({ directory, port = 43130, backendRequest } = 
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   atomic(path.join(router.directory, 'connection.json'), { baseUrl: `http://127.0.0.1:${server.address().port}`, token: router.state.token, pid: process.pid });
-  let checkingHealth=false;router.healthTimer=setInterval(async()=>{if(checkingHealth||!Object.keys(router.state.healthSubscribers).length)return;checkingHealth=true;try{await router.health();}catch{}finally{checkingHealth=false;}},30000);router.healthTimer.unref();
+  router.healthTimer=setInterval(()=>{if(!Object.keys(router.state.healthSubscribers).length)return;for(const app of ['codex','claude','deepseek'])void router.healthMonitor.probe(app).catch(()=>{});},30000);router.healthTimer.unref();
   return { router, server, close: () => new Promise(resolve => { router.close(); server.close(resolve); server.closeAllConnections(); }) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

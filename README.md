@@ -16,6 +16,7 @@ The project reuses native desktop sessions. It does not replace them with a sepa
 - Explicit full-access mode for supported, bridge-managed Codex sessions.
 - Build verification, capability gates, local compatibility profiles, immutable adapter snapshots, idle activation, and compatible-build rollback.
 - Per-user Windows logon startup and component recovery.
+- Independent health probes with persistent failure confirmation, bounded status responses, and per-step timeout diagnostics. See [health monitoring](docs/health-monitoring.md).
 
 ## Quick start
 

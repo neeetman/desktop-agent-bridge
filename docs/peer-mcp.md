@@ -14,6 +14,12 @@ Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 
 
 `expectReply:false` 表示通知，接收方不得回复或继续转发。`bridge_receive` 查看收件箱，`bridge_message` 读消息状态，`bridge_archive_messages` 归档已结束消息，`bridge_health` 查看组件和原生连通性。
 
+## 健康通知与超时诊断
+
+`bridge_health({app:"all",subscribe:true})` 订阅每 30 秒独立探测、经过连续故障确认的通知；`subscribe:false` 退订。连续至少 3 次失败且持续至少 60 秒才发一次故障通知，确认恢复后再发一次恢复通知。单次失败记录为 degraded，不触发通知。未订阅及 `runtime/router/protected-threads.json` 中的受保护会话不会收到健康通知。
+
+每端同时最多一个探测，定时与手动检查共用结果。HTTP 服务预算 10 秒、原生线程列表预算 75 秒；慢端不阻塞其他端落盘。`bridge_health` 等待约 2.5 秒后可返回 `checking:true` 与最近完成样本的 `checkedAt/ageMs`，没有样本时为 `ok:null`。`ok` 是最近完整探测结果，`confirmedOk` 是通知确认状态；错误步骤、预算、耗时及错误码见 `steps` 与 `runtime/router/health-probes.jsonl`。普通任务预算和未知写入不重放规则不变。详见 [健康监测](health-monitoring.md)（英文）。
+
 ## 决策
 
 使用 `bridge_request_decision`，提供精确目标、question、2–10 个 options，以及可选 recommendation/context。请求被接受后结束本轮等待，不猜答案或轮询。接收方调用 `bridge_answer_decision`；答案会唤醒原会话继续。`bridge_decisions` 查看收到的决策。
