@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1 (unreleased)
+
+- Organize runtime code by subsystem under `src/`, platform helpers under `scripts/`, and tests under `tests/`.
+- Preserve self-contained compatibility snapshots through a shared logical source map.
+- Make English the default README, retain the Chinese translation, and add contributor documentation.
+- Update installer, supervision, MCP configuration, package contents, and source checks for the new layout. The public CLI command remains `desktop-agent-bridge`.
+
 ## 0.8.0
 
 - P0: shared compatibility selection, running/installed build separation, process generations, typed pre-dispatch failures, revision-aware attachment monitors and native capability gates.

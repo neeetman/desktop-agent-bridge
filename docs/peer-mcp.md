@@ -1,0 +1,55 @@
+# 会话协作 MCP
+
+Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 Host 中的 `deepseek-plugin.mjs`。当前共用工具目录有 **20 个工具**，已启动的旧 MCP worker 可能仍保留旧目录。
+
+## 路由和回复
+
+先调用 `bridge_self` 确认本机当前会话。调用 `bridge_list_threads` 按完整标题、项目、状态查询；只有确认唯一目标后，才使用 `{toApp, toThreadId}` 发送。标题支持检索，但不是唯一标识，不能作为 `toThreadId`。
+
+```json
+{"toApp":"claude","toThreadId":"<查询确认的目标ID>","text":"请检查接口设计并回复结论","messageId":"review-api-v1","expectReply":true}
+```
+
+使用 `bridge_send` 发送；接收方使用 `bridge_ack` 确认消费，使用 `bridge_reply({messageId,text})` 回复。路由器自动返回来源会话并在空闲时唤醒。`delivered` 只表示投递，不代表已阅读；结果未知的派发不会自动重发。相同请求复用稳定的 messageId，不同内容不能复用。
+
+`expectReply:false` 表示通知，接收方不得回复或继续转发。`bridge_receive` 查看收件箱，`bridge_message` 读消息状态，`bridge_archive_messages` 归档已结束消息，`bridge_health` 查看组件和原生连通性。
+
+## 决策
+
+使用 `bridge_request_decision`，提供精确目标、question、2–10 个 options，以及可选 recommendation/context。请求被接受后结束本轮等待，不猜答案或轮询。接收方调用 `bridge_answer_decision`；答案会唤醒原会话继续。`bridge_decisions` 查看收到的决策。
+
+决策答案只提供任务方向，不能批准工具权限。
+
+## 创建任务和读取配置
+
+先用 `bridge_projects`、`bridge_models` 确认目标项目和可用模型，再用 `bridge_create_task` 创建。创建新会话需要用户授权和非空初始 prompt。传入 model/effort 后，用 `bridge_settings` 读回实际设置，不能把请求值当成已生效值。使用 `bridge_task` 跟踪任务，使用 `bridge_read_thread` 读取原生会话。
+
+Codex 支持登记项目及其现有本地 worktree 目录的严格匹配；不提供创建新 git worktree 或 cloud 环境的桥接操作。已有会话保持项目归属。
+
+DeepSeek 的 workspaceId、workspaceName、workspacePath、originCwd 和 cwd 分别读回；cwd 不代替工作区身份。外部 HTTP `/v1/workspaces` 可列出、登记原生工作区。
+
+## Codex 完全权限
+
+创建任务时可显式设置：
+
+```json
+{"toApp":"codex","prompt":"<用户授权任务>","idempotencyKey":"job-v1","sandboxMode":"danger-full-access","approvalPolicy":"never"}
+```
+
+完全权限时不传 writableRoots。省略 sandboxMode 时沿用本机配置，初始默认 `workspace-write` / `on-request`。
+
+已有空闲、托管且未受保护的 Codex 会话可使用：
+
+```json
+{"toApp":"codex","toThreadId":"<托管会话ID>","sandboxMode":"danger-full-access","approvalPolicy":"never"}
+```
+
+将以上参数交给 `bridge_set_permissions`。活动会话、有待批准请求、受保护或非托管会话会被拒绝。结果 `appliedTo:next-turn` 表示下一轮生效，后续 send/wake 会恢复持久策略。
+
+`bridge_settings.settings.nextTurnPermissions` 给出原生下一轮设置；顶层权限字段按 permissionScope 区分最近已执行轮和下一轮。完全权限仍受当前 Windows 进程身份和系统限制，不等于管理员权限。
+
+额外 writableRoots 必须落入本机 `settings.json` 的 allowedWritableRoots，经过 realpath/junction 校验。对端不能修改这份白名单。
+
+## 外部客户端
+
+`client.mjs` 还支持 HTTP 桥接工具和任务专用 callback 凭证。使用 `--args-file <JSON路径>` 避免 shell 转义；不要把 token 写进任务正文或日志。每轮凭证仅适用于其自身任务。服务端 HTTP API 的主要路由见 [架构说明](architecture.md)。

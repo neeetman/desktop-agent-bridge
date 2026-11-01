@@ -6,7 +6,7 @@
 - Python 离线测试：12 项通过，覆盖首次初始化、策略保留、配置合并、cc-switch 小表结构及维护边界。
 - PowerShell 脚本 AST 解析通过。
 - Codex helper 内容 revision 和本地 JavaScript 依赖检查通过。
-- 使用 Windows PowerShell 5.1 执行 `install.ps1 -CheckOnly`：已核验两端桌面文件哈希，随后识别源机器的旧安装计划任务并拒绝覆盖。此项是预期的迁移冲突保护，不是完整安装成功。
+- 使用 Windows PowerShell 5.1 执行 `scripts/install.ps1 -CheckOnly`：已核验两端桌面文件哈希，随后识别源机器的旧安装计划任务并拒绝覆盖。此项是预期的迁移冲突保护，不是完整安装成功。
 
 真实会话双向通信、决策、原生权限及恢复已在原 v0.7 运行目录验证；独立仓库保留实现和离线测试，没有把原机器的 runtime、凭证或真实聊天数据纳入 Git。
 
@@ -18,7 +18,17 @@
 - 覆盖配置/进程代次变化、构建/能力拒绝、旧安装身份、不可变快照和回退、忙碌/审批/保护阻断、并发激活、协调器崩溃释放 OS 锁、附着中途失败恢复及队列/决策保留。
 - Python 与 PowerShell AST 解析通过，helper revision、profile 摘要及本地依赖检查通过。
 - 公开 scope npm 包的 tarball 在隔离目录实际安装，CLI、兼容目录和源码摘要检查通过；真实被动 doctor 核验两款桌面构建且未创建 runtime。
-- 原生产桌面 PID 保持 Codex 25844、Claude 91256；没有在独立仓库安装新 helper、刷新 MCP、重启桌面或切换旧目录服务。
-- npm 正式发布需要维护者认证；包和 Git 提交的完成不代表已发布。
+- 原生产桌面与服务保持运行；没有在独立仓库安装新 helper、刷新 MCP、重启桌面或切换旧目录服务。
+- `0.8.0` 已于 2026-11-01 正式发布至 npm，并从 registry 实际安装验证；摘要与发布前审阅包一致，见 [发布记录](releases/v0.8.0.md)。
 
 新 helper 的真实升级 canary、全局 loaded-thread 空闲契约、第二台机器安装及整机重启仍待维护窗口验证；无法确认原生空闲时实现保持阻断。
+
+## v0.8.1 仓库整理（2026-11-01，未发布）
+
+- 从 Git 暂存区导出到带空格的独立目录，重新执行 `npm ci`、93 项 Node 测试、15 项 Python 测试和 `npm run check`，全部通过。
+- PowerShell 脚本 AST 解析通过；默认英文 README、中文入口和文档链接检查通过。
+- npm 本地包核验逻辑源码映射完整，排除 runtime 状态、测试、凭证和 Python 缓存；隔离安装后 CLI、兼容目录及源码摘要检查通过。
+- 被动 doctor 核验两端桌面构建，未附着、未创建 runtime。保留原运行安装，没有刷新正在工作的会话。
+- 原生 helper 字节及已验证 profile 标识保持一致；DeepSeek Host 发布目录保留独立依赖，新增回归测试覆盖移动后的共享导入。
+
+本次整理没有执行真实 helper 升级、第二台机器安装或 Windows 重启；此前的现场验证缺口仍然适用。

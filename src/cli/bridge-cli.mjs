@@ -1,0 +1,35 @@
+import {sourcePath} from "../lib/paths.mjs";
+import {coordinator,compatError,ROOT} from '../compat/compatibility.mjs';
+import {activateProfile,helperStatus} from '../compat/native-management.mjs';
+import {spawn} from 'node:child_process';
+import path from 'node:path';
+import {codexMcp} from '../adapters/codex/codex-mcp-control.mjs';
+import {lifecycle} from '../adapters/claude/claude-lifecycle.mjs';
+const option=(args,name)=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
+export async function main(args){
+ try{
+  let result;const app=option(args,'--app');
+  if(app&&!['codex','claude'].includes(app))throw compatError('INVALID_ARGUMENT','--app must be codex or claude');
+  if(args[0]==='doctor'){
+   result=await coordinator.doctor(app);
+   if(args.includes('--probe')){if(!app)throw compatError('INVALID_ARGUMENT','--probe requires --app');const selected=await coordinator.resolve(app,app==='codex'?'execution':'read');result.probe=await helperStatus(selected,app==='codex'?'execution':'claude');result.passive=false;}
+  }else if(args[0]==='compat'){
+   if(args[1]==='list')result={profiles:coordinator.profiles().map(({profile})=>({id:profile.id,app:profile.app,version:profile.packageVersion,revoked:profile.revoked,adapterDigest:profile.adapterDigest,capabilities:profile.capabilities}))};
+   else if(args[1]==='import'){if(!args[2])throw compatError('INVALID_ARGUMENT','A local package directory is required');result=await coordinator.importPackage(args[2]);}
+   else {
+    if(!app)throw compatError('INVALID_ARGUMENT','--app is required');
+    const id=option(args,'--profile');
+    if(args[1]==='plan')result=await coordinator.plan(app,id);
+    else if(args[1]==='activate'){if(!id||!args.includes('--when-idle'))throw compatError('INVALID_ARGUMENT','activate requires --profile and --when-idle');result=await activateProfile(app,id);}
+    else if(args[1]==='rollback'){const previous=coordinator.state().apps[app]?.previousProfileId;if(!previous)throw compatError('NO_ROLLBACK','No previous profile is recorded');result=await activateProfile(app,previous);}
+    else if(args[1]==='recover')result=await coordinator.recover(app);
+    else if(args[1]==='refresh-mcp'){if(app==='codex')result=await codexMcp('reload');else{const thread=option(args,'--thread');if(!thread)throw compatError('INVALID_ARGUMENT','Claude refresh requires --thread with an exact idle session ID');result={requested:true,nativeResult:await lifecycle('native',{payload:{nativeMethod:'mcpReconnect',args:[thread]}}),workerVerificationRequired:true};}}
+    else throw compatError('INVALID_ARGUMENT','Unknown compat command');
+   }
+  }else if(args[0]==='install'){
+   if(process.platform!=='win32')throw compatError('UNSUPPORTED_PLATFORM','Desktop installation requires Windows');
+   const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',sourcePath(ROOT,'install.ps1'),...args.slice(1)],{stdio:'inherit',windowsHide:true});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});return;
+  }else result={name:'@neeetman/desktop-agent-bridge',commands:['doctor [--app codex|claude] [--probe]','compat list','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>']};
+  console.log(JSON.stringify(result,null,2));
+ }catch(error){console.error(JSON.stringify({error:error.message,code:error.code??'BRIDGE_ERROR',dispatchNotStarted:error.dispatchNotStarted??false}));process.exitCode=1;}
+}

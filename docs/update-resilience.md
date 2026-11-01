@@ -22,7 +22,7 @@
 | MCP 配置更新、helper 附着、worker 工具目录更新是不同步骤 | 配置已写或进程健康容易被误报为工具已可用 | 分层报告，并从真实 worker 验证目录 |
 | Codex 存在 Webpack ID/类名，Claude identity 依赖 bundle 路径 | 打包和压缩变化仍会破坏定位 | 版本适配包 + 有界结构定位 + 契约验证 |
 
-源码入口：[监控 Codex](../codex-mcp-autoattach.py)、[监控 Claude](../claude-autoattach.py)、[守护](../bridge-supervisor.mjs)、[Codex 执行](../codex-execution.mjs)、[运行时定位](../codex-runtime.cjs)、[Claude 原生接口](../claude-main-attach.cjs)。
+源码入口：[监控 Codex](../scripts/runtime/codex-mcp-autoattach.py)、[监控 Claude](../scripts/runtime/claude-autoattach.py)、[守护](../src/supervisor/bridge-supervisor.mjs)、[Codex 执行](../src/adapters/codex/codex-execution.mjs)、[运行时定位](../src/adapters/codex/codex-runtime.cjs)、[Claude 原生接口](../src/adapters/claude/claude-main-attach.cjs)。
 
 ## 2. 分为稳定核心和版本适配包
 

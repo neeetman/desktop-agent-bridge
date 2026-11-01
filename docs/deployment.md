@@ -6,9 +6,9 @@ Windows x64，Node.js 24+，Python 3.11+ 且同目录含 pythonw.exe，Frida 17.
 
 ```powershell
 npm ci
-python -m pip install -r requirements-claude.txt
-.\install.ps1 -CheckOnly
-.\install.ps1 -CallerThread "<本机会话ID>" -WritableRoots "C:\Work"
+python -m pip install -r requirements.txt
+.\scripts\install.ps1 -CheckOnly
+.\scripts\install.ps1 -CallerThread "<本机会话ID>" -WritableRoots "C:\Work"
 ```
 
 如果 PowerShell 执行策略阻止脚本，可按组织允许的方式使用进程级策略运行，不需要为此修改系统级设置。安装器用系统工具发现当前用户的 Appx 安装位置；不依赖源机器的 WindowsApps 路径。
