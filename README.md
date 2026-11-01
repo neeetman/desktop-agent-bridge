@@ -6,7 +6,7 @@ An open-source, local session bridge for **Codex Desktop, Claude Code in Claude 
 
 The project reuses native desktop sessions. It does not replace them with a separate Codex app-server. It depends on private desktop interfaces, so support is tied to verified application builds.
 
-**License:** [MIT](LICENSE) · **npm:** [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge) · **Development version:** 0.8.1
+**License:** [MIT](LICENSE) · **npm:** [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge) · **Version:** 0.8.1
 
 ## Features
 

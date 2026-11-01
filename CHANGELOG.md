@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.1 (unreleased)
+## 0.8.1 — 2026-11-01
 
 - Organize runtime code by subsystem under `src/`, platform helpers under `scripts/`, and tests under `tests/`.
 - Preserve self-contained compatibility snapshots through a shared logical source map.

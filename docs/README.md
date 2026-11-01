@@ -17,3 +17,4 @@ The default project overview and contribution workflow are available in English.
 | [Validation scope](validation.md) | Chinese | Completed checks and outstanding live validation |
 | [npm releases](npm-release.md) | Chinese | Maintainer publication and npm installation |
 | [v0.8.0 release](releases/v0.8.0.md) | English | Published registry version and integrity |
+| [v0.8.1 release](releases/v0.8.1.md) | English | Repository layout, documentation, and release validation |
