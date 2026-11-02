@@ -14,6 +14,8 @@ node .\src\supervisor\supervisor-status.mjs resume
 
 pause 暂停当前守护恢复循环，通信服务仍在；下次登录恢复正常守护。停止服务前先停用看门狗，避免被立即重新启动。
 
+进程枚举使用终止式错误处理，并要求结果包含可识别的守护进程自身。空列表、不完整快照或 WMI/CIM 查询失败不能解释为应用已退出；此时 `processInventory.ok=false`、错误码为 `PROCESS_SNAPSHOT_UNAVAILABLE`，跳过桌面启动、服务恢复和原生探测。已有进程继续运行，查询恢复后再正常管理。否则，把枚举错误当空列表会每约 15 秒重复启动 GUI，并在已有服务端口上触发 EADDRINUSE。`/health` 仍可反映守护 HTTP 存活，完整管理状态以 `/status` 的 processInventory 为准。
+
 ```powershell
 .\scripts\uninstall-autostart.ps1
 ```

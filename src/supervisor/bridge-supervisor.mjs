@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { backoffMs, childEnvironment, matchesScript, shouldRecover, restoreAppState, installedDesktopExecutable,runningDesktopCandidates } from './supervisor-policy.mjs';
+import { backoffMs, childEnvironment, matchesScript, shouldRecover, restoreAppState, requireProcessSnapshot, installedDesktopExecutable,runningDesktopCandidates } from './supervisor-policy.mjs';
 import { codexMcp } from '../adapters/codex/codex-mcp-control.mjs';
 import { lifecycle } from '../adapters/claude/claude-lifecycle.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
@@ -32,9 +32,9 @@ const journal=path.join(DIRECTORY,'events.jsonl');
 const record=(type,data)=>{fs.appendFileSync(journal,JSON.stringify({time:new Date().toISOString(),type,...data})+'\n',{mode:0o600});};
 
 async function snapshot(){
-  const command="@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('node.exe','python.exe','pythonw.exe','Claude.exe','ChatGPT.exe','codex.exe','DeepSeek Harness.exe') -and $_.SessionId -eq (Get-Process -Id $PID).SessionId } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress";
+  const command="$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -in @('node.exe','python.exe','pythonw.exe','Claude.exe','ChatGPT.exe','codex.exe','DeepSeek Harness.exe') -and $_.SessionId -eq (Get-Process -Id $PID).SessionId } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress";
   const {stdout}=await run(config.powershell,['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,timeout:10000,maxBuffer:8*1024*1024,env:environment});
-  const rows=JSON.parse(stdout.trim()||'[]');return new Map((Array.isArray(rows)?rows:[rows]).map(row=>[row.ProcessId,row]));
+  return requireProcessSnapshot(JSON.parse(stdout.trim()||'[]'),process.pid);
 }
 async function request(file,route='/health',method='GET',body,timeout=2500){
   const connection=read(file);if(!connection?.baseUrl)throw Error('Connection not ready');
@@ -219,8 +219,13 @@ export class Supervisor {
   }
   async tick(){
     if(this.ticking||this.state.paused)return;this.ticking=true;this.persist();
-    try{const rows=await snapshot();await this.refreshInstalledApps(rows);await this.ensureApps(rows);await Promise.allSettled([...this.services.values()].map(service=>this.ensureService(service,rows).catch(error=>{service.lastError=error.message;})));void this.nativeProbe(rows);}
-    catch(error){record('supervisor.tick_error',{error:error.message});}
+    let phase='snapshot';
+    try{const rows=await snapshot();this.state.processInventory={ok:true,checkedAt:new Date().toISOString()};phase='manage';await this.refreshInstalledApps(rows);await this.ensureApps(rows);await Promise.allSettled([...this.services.values()].map(service=>this.ensureService(service,rows).catch(error=>{service.lastError=error.message;})));void this.nativeProbe(rows);}
+    catch(error){
+      const now=Date.now(),code=phase==='snapshot'?'PROCESS_SNAPSHOT_UNAVAILABLE':error.code??'SUPERVISOR_ERROR';
+      if(phase==='snapshot')this.state.processInventory={ok:false,checkedAt:new Date().toISOString(),code,error:'Process enumeration failed; automatic launch and recovery are blocked'};
+      if(phase!=='snapshot'||!this.lastInventoryErrorAt||now-this.lastInventoryErrorAt>=300000){record('supervisor.tick_error',{phase,code,error:error.message});if(phase==='snapshot')this.lastInventoryErrorAt=now;}
+    }
     finally{this.persist();this.ticking=false;}
   }
 }

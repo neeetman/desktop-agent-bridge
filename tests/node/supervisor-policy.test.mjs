@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {backoffMs,childEnvironment,matchesScript,shouldRecover,restoreAppState,installedDesktopExecutable} from '../../src/supervisor/supervisor-policy.mjs';
+import {backoffMs,childEnvironment,matchesScript,shouldRecover,restoreAppState,installedDesktopExecutable,requireProcessSnapshot} from '../../src/supervisor/supervisor-policy.mjs';
 test('desktop update resolves the registered package, independent of saved version paths',()=>{
   const packages=[{Name:'Claude',InstallLocation:'C:\\Program Files\\WindowsApps\\Claude_4.29.0.0_x64__pzs8sxrjxfjjc'},{Name:'OpenAI.Codex',InstallLocation:'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.1023.6123.0_x64__2p2nqsd0c76g0'}];
   assert.match(installedDesktopExecutable('codex',packages),/26\.1023\.6123\.0.*app\\ChatGPT.exe$/);
@@ -55,4 +55,13 @@ test('Windows process watcher distinguishes normal desktop exit from crash exit'
   const rows=output.trim().split('\n').map(JSON.parse);
   assert.equal(rows.find(row=>row.app==='codex').clean,true);
   assert.equal(rows.find(row=>row.app==='claude').clean,false);
+});
+
+test('failed or incomplete process enumeration cannot be interpreted as all managed apps exiting',()=>{
+ const own={ProcessId:123,ParentProcessId:1,Name:'node.exe',ExecutablePath:'C:\\Node\\node.exe',CommandLine:'node bridge-supervisor.mjs'};
+ for(const value of [[],null,{},[null],[{ProcessId:456,ParentProcessId:1,Name:'ChatGPT.exe'}],[{...own,CommandLine:null}],[own,own]]){
+  assert.throws(()=>requireProcessSnapshot(value,123),error=>error.code==='PROCESS_SNAPSHOT_UNAVAILABLE');
+ }
+ assert.equal(requireProcessSnapshot([own],123).get(123),own);
+ assert.equal(requireProcessSnapshot(own,123).size,1);
 });

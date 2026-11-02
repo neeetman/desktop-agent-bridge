@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Block automatic launches and recovery when Windows process enumeration fails or omits the supervisor itself, preventing repeated GUI activation and duplicate service starts.
+
 - Debounce health alerts until three consecutive failures spanning at least 60 seconds; retain confirmed state across router restarts.
 - Coalesce per-app probes, save healthy peer results independently, and return pending status within 2.5 seconds when a native read is slow.
 - Record service/native step budgets, elapsed time, error codes, and periodic diagnostic samples without retrying native writes.

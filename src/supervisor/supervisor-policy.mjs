@@ -41,3 +41,14 @@ export function runningDesktopCandidates(app,rows){
   return matches&&!same(rows.get(row.ParentProcessId)?.ExecutablePath,executable);
  });
 }
+
+export function requireProcessSnapshot(value, supervisorPid) {
+  const rows=Array.isArray(value)?value:[value];
+  const fail=()=>{throw Object.assign(new Error('Process inventory is incomplete or unavailable; automatic launch and recovery are blocked'),{code:'PROCESS_SNAPSHOT_UNAVAILABLE'});};
+  if(!rows.length||rows.some(row=>!row||!Number.isInteger(row.ProcessId)||row.ProcessId<1||!Number.isInteger(row.ParentProcessId)||typeof row.Name!=='string'))fail();
+  const own=rows.find(row=>row.ProcessId===supervisorPid);
+  if(!own||own.Name.toLowerCase()!=='node.exe'||!own.ExecutablePath||!own.CommandLine)fail();
+  const result=new Map(rows.map(row=>[row.ProcessId,row]));
+  if(result.size!==rows.length)fail();
+  return result;
+}
