@@ -28,6 +28,13 @@ test('Claude effort setter returns void: verify metadata before sending and reje
   assert.equal(calls.some(call => call[0] === 'sendMessage'), false);
 });
 
+test('Claude thread reads preserve native archive status for notification routing',async()=>{
+  const tools=new ClaudeTools();
+  tools.native={request:async(method)=>method==='getSession'?{sessionId:'archived-chat',isArchived:true}: {messages:[],hasMore:false}};
+  const result=await tools.call('read_thread',{threadId:'archived-chat'});
+  assert.equal(result.thread.archived,true);assert.equal(result.thread.id,'archived-chat');
+});
+
 test('historical final answers followed by a new user turn complete without relying on a missing result event',()=>{
  const turns=claudeTurns([{type:'user',uuid:'old',message:{content:'old task'}},{type:'assistant',uuid:'done',timestamp:'old-final-time',message:{content:[{type:'text',text:'old answer'}],stop_reason:'end_turn'}},{type:'user',uuid:'current',message:{content:'new task'}},{type:'assistant',uuid:'progress',message:{content:[{type:'text',text:'working'}],stop_reason:'tool_use'}}],{turnRunning:true,isRunning:true});
  assert.equal(turns[0].status,'completed');assert.equal(turns[0].completionEvidence,'native-final-message-before-next-user');assert.equal(turns[1].status,'inProgress');

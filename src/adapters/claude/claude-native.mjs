@@ -94,7 +94,7 @@ export class ClaudeTools {
         const session = await this.native.request('getSession', [args.threadId]);
         if (!session) throw new Error('Claude session not found');
         const tail = await this.native.request('getTranscriptTail', [args.threadId, 200]);
-        return { thread: { id: session.sessionId, kind: 'claude', hostId: 'local', title: session.title, cwd: session.cwd, status: { type: session.turnRunning || session.isRunning ? 'active' : 'idle' } }, turns: claudeTurns(tail.messages, session).reverse().slice(0, args.turnLimit ?? 10), hasMore: tail.hasMore };
+        return { thread: { id: session.sessionId, kind: 'claude', hostId: 'local', title: session.title, cwd: session.cwd, archived: session.isArchived===true, status: { type: session.turnRunning || session.isRunning ? 'active' : 'idle' } }, turns: claudeTurns(tail.messages, session).reverse().slice(0, args.turnLimit ?? 10), hasMore: tail.hasMore };
       }
       case 'create_thread': {
         let cwd;

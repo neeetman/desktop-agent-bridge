@@ -2,6 +2,8 @@
 
 `bridge_health({app:"all",subscribe:true})` subscribes the calling session to confirmed failure/recovery transitions. `subscribe:false` removes its subscription. Unsubscribed and protected sessions receive no health notifications.
 
+Subscriptions persist across router restarts. Before dispatching a queued health notice, the router rechecks the subscription, protection list and the native thread's archive flag. An archived recipient is unsubscribed automatically; its unsent health notices expire with a recorded reason. Unsubscribing also expires queued health notices and works without a reachable desktop. Already dispatched or unknown outcomes remain recorded and are never replayed by this cleanup. Health notices carry the affected app so a changed app filter also applies to queued notices.
+
 Each app has one probe in flight and at least 30 seconds between probe starts. Manual and background requests share it. A slow app does not delay another app's state update. The service HTTP check (`/health`) has a 10-second budget, followed by a read-only native thread query (`/v1/threads?limit=1`) with a 75-second budget. This leaves room for native adapters' own timeout responses. Ordinary task requests keep their existing budgets; no native writes are retried.
 
 The first or second failed sample produces `status:"degraded"`, without a notification. A failure is confirmed after at least three consecutive failed probes spanning at least 60 seconds from the first failed completion. It produces one failure notice; the next complete successful probe produces one recovery notice. A transient failure followed by success produces neither notice. Failure counts and confirmed state persist across router restarts.

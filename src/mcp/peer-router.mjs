@@ -152,12 +152,25 @@ export class PeerRouter {
   async processJob(job) {
     const message = this.state.messages[job.id];
     if (!message) return;
+    const queuedHealth=job.status==='queued'&&message.kind==='health';
+    if(queuedHealth&&!this.healthRecipientEnabled(message.to,message)){
+      this.skipHealth(job,'health_unsubscribed_or_protected');return;
+    }
     if(job.status==='queued'&&message.kind==='decision_request'&&this.state.decisions[message.decisionId]?.status==='answered'){
       job.status=message.status='completed';job.skippedReason='decision_already_answered';this.save();return;
     }
     if (job.status === 'queued' || job.status === 'dispatching') {
       if (Date.now() > message.expiresAt && job.status === 'queued') { job.status = message.status = 'expired'; this.save(); return; }
       const snapshot = await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}`);
+      if(queuedHealth){
+        if(snapshot.thread?.archived===true||snapshot.thread?.isArchived===true){
+          this.unsubscribeHealth(message.to,'health_recipient_archived');return;
+        }
+        // Subscription/protection can change while the native read is pending.
+        if(job.status!=='queued'||!this.healthRecipientEnabled(message.to,message)){
+          if(job.status==='queued')this.skipHealth(job,'health_unsubscribed_or_protected');return;
+        }
+      }
       if (snapshot.thread?.status?.type === 'active') return;
       if(message.kind==='decision_answer'&&this.state.decisions[message.decisionId]?.status!=='answered')return;
       job.status = 'dispatching'; job.prompt ??= this.prompt(message); this.save();
@@ -234,6 +247,31 @@ export class PeerRouter {
     const apps=app&&app!=='all'?[app]:['codex','claude','deepseek'];
     return this.healthMonitor.check(apps);
   }
+  healthRecipientEnabled(who,message){
+    let protectedThreads=[];try{protectedThreads=JSON.parse(fs.readFileSync(path.join(this.directory,'protected-threads.json'))).threadIds??[];}catch{}
+    if(protectedThreads.includes(who.threadId))return false;
+    return Object.values(this.state.healthSubscribers).some(row=>equal(row.who,who)&&(!message?.healthApp||!row.apps||row.apps.includes(message.healthApp)));
+  }
+  skipHealth(job,reason){
+    job.status=this.state.messages[job.id].status='expired';job.skippedReason=reason;this.save();
+  }
+  unsubscribeHealth(who,reason='health_unsubscribed'){
+    for(const [key,row] of Object.entries(this.state.healthSubscribers))if(equal(row.who,who))delete this.state.healthSubscribers[key];
+    for(const job of Object.values(this.state.jobs)){
+      const message=this.state.messages[job.id];
+      if(job.status==='queued'&&message?.kind==='health'&&equal(message.to,who))this.skipHealth(job,reason);
+    }
+    this.save();
+  }
+  async setHealthSubscription(input){
+    const who=address(input.from);
+    if(typeof input.subscribe!=='boolean')throw bad(400,'subscribe must be boolean');
+    // Removing a local subscription must work even when its desktop is unavailable.
+    if(!input.subscribe){this.unsubscribeHealth(who);return;}
+    const snapshot=await this.backendRequest(who.app,`/v1/threads/${encodeURIComponent(who.threadId)}`);
+    if(snapshot.thread?.archived===true||snapshot.thread?.isArchived===true)throw bad(409,'Archived chats cannot subscribe to health notifications');
+    this.state.healthSubscribers[`${who.app}:${who.threadId}`]={who,apps:input.app&&input.app!=='all'?[input.app]:null};this.save();
+  }
   recordHealth(result,transition){
     const file={codex:'codex-mcp-compatibility.json',claude:'claude-attach-compatibility.json'}[result.app];let version=null;try{const m=JSON.parse(fs.readFileSync(sourcePath(ROOT,file)));version=m.version??m.desktopVersion;}catch{}
     result.validatedDesktopVersion=version;
@@ -243,11 +281,10 @@ export class PeerRouter {
     if(transition){
       for(const subscriber of Object.values(this.state.healthSubscribers)){
         if(subscriber.apps&&!subscriber.apps.includes(result.app))continue;
-        let protectedThreads=[];try{protectedThreads=JSON.parse(fs.readFileSync(path.join(this.directory,'protected-threads.json'))).threadIds??[];}catch{}
-        if(protectedThreads.includes(subscriber.who.threadId))continue;
+        if(!this.healthRecipientEnabled(subscriber.who))continue;
         const detail=transition==='failure'?`${result.failedStep}，本次 ${result.elapsedMs}ms，连续 ${result.consecutiveFailures} 次失败，${result.errorCode}：${result.error}`:`本次 ${result.elapsedMs}ms，上次故障步骤 ${result.lastFailure?.step??'unknown'}，已清除 ${result.recoveredFailures} 次连续失败`;
         const id=crypto.randomUUID(),text=`桌面桥接健康状态：${result.app} ${transition==='recovery'?'已恢复':'持续探测失败'}。${detail}。${result.repair??''} 请用 bridge_health 查看详情。这是健康通知，不要求回复。`;
-        this.state.messages[id]={id,kind:'health',from:{app:'bridge',threadId:'health-monitor'},to:subscriber.who,text,expectReply:false,status:'queued',createdAt:new Date().toISOString(),expiresAt:Date.now()+3600000,consumption:{status:'unconfirmed',turnId:null},protocolVersion:2};
+        this.state.messages[id]={id,kind:'health',healthApp:result.app,from:{app:'bridge',threadId:'health-monitor'},to:subscriber.who,text,expectReply:false,status:'queued',createdAt:new Date().toISOString(),expiresAt:Date.now()+3600000,consumption:{status:'unconfirmed',turnId:null},protocolVersion:2};
         this.state.jobs[id]={id,status:'queued'};
       }
     }
@@ -272,7 +309,7 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         case '/v1/ack': return reply(200,await router.acknowledge(data));
         case '/v1/health': {
           if(data.app&&!['codex','claude','deepseek','all'].includes(data.app))throw bad(400,'Unknown app');
-          if(data.subscribe!==undefined){const who=address(data.from);await router.validate(who);const key=`${who.app}:${who.threadId}`;if(data.subscribe)router.state.healthSubscribers[key]={who,apps:data.app&&data.app!=='all'?[data.app]:null};else delete router.state.healthSubscribers[key];router.save();}
+          if(data.subscribe!==undefined)await router.setHealthSubscription(data);
           return reply(200,await router.health(data.app));
         }
         case '/v1/create-task': {

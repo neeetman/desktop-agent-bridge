@@ -153,6 +153,61 @@ test('unloaded chats remain valid recipients when native model settings have no 
     const message=await f.router.send({from,to,text:'wake unloaded recipient'});assert.equal(message.status,'queued');
   }finally{f.close();}
 });
+
+test('health notices never wake archived recipients and expire only known-unsent health jobs',async()=>{
+  const f=fixture();try{
+    f.router.state.healthSubscribers={one:{who:to}};
+    f.router.recordHealth({app:'codex',ok:false},'failure');
+    f.router.recordHealth({app:'codex',ok:true},'recovery');
+    const notices=f.router.receive(to).messages;
+    const ordinary=await f.router.send({from,to,text:'explicit collaboration'});
+    f.router.state.jobs[notices[1].id].status=notices[1].status='unknown';
+    f.router.backendRequest=async(app,route,...rest)=>route.startsWith('/v1/threads/')?{thread:{archived:true,status:{type:'idle'}}}:f.backendRequest(app,route,...rest);
+    await f.router.processJob(f.router.state.jobs[notices[0].id]);
+    assert.equal(f.sends.length,0);assert.deepEqual(f.router.state.healthSubscribers,{});
+    assert.equal(notices[0].status,'expired');assert.equal(f.router.state.jobs[notices[0].id].skippedReason,'health_recipient_archived');
+    assert.equal(notices[1].status,'unknown');assert.equal(f.router.state.jobs[ordinary.id].status,'queued');
+    const restored=new PeerRouter({directory:f.directory,backendRequest:f.backendRequest,pollMs:1e9});
+    try{assert.deepEqual(restored.state.healthSubscribers,{});assert.equal(restored.state.messages[notices[0].id].status,'expired');}finally{restored.close();}
+    await assert.rejects(f.router.setHealthSubscription({from:to,subscribe:true}),/Archived/);
+  }finally{f.close();}
+});
+
+test('offline unsubscribe cancels queued health notices and does not retry uncertain or dispatched work',async()=>{
+  const f=fixture();try{
+    f.router.state.healthSubscribers={one:{who:to}};
+    for(let i=0;i<4;i++)f.router.recordHealth({app:'codex',ok:false},'failure');
+    const notices=f.router.receive(to).messages;
+    for(const [i,status] of [[1,'unknown'],[2,'dispatching'],[3,'delivered']])f.router.state.jobs[notices[i].id].status=notices[i].status=status;
+    f.router.backendRequest=async()=>{throw Error('desktop offline');};
+    await f.router.setHealthSubscription({from:to,subscribe:false});
+    assert.deepEqual(f.router.state.healthSubscribers,{});assert.equal(notices[0].status,'expired');
+    assert.deepEqual(notices.slice(1).map(m=>m.status),['unknown','dispatching','delivered']);
+  }finally{f.close();}
+});
+
+test('health delivery rechecks unsubscribe after a slow native read and applies changed app filters',async()=>{
+  const f=fixture();try{
+    f.router.state.healthSubscribers={one:{who:to}};
+    f.router.recordHealth({app:'codex',ok:false},'failure');
+    const notice=f.router.receive(to).messages[0];let release,started;
+    const entered=new Promise(resolve=>{started=resolve;});
+    f.router.backendRequest=async()=>{started();return new Promise(resolve=>{release=resolve;});};
+    const pending=f.router.processJob(f.router.state.jobs[notice.id]);await entered;
+    await f.router.setHealthSubscription({from:to,subscribe:false});release({thread:{status:{type:'idle'}}});await pending;
+    assert.equal(f.sends.length,0);assert.equal(notice.status,'expired');
+    f.router.state.healthSubscribers={one:{who:to}};
+    f.router.recordHealth({app:'codex',ok:false},'failure');
+    const filtered=f.router.receive(to).messages.at(-1);
+    f.router.state.healthSubscribers.one.apps=['claude'];
+    await f.router.processJob(f.router.state.jobs[filtered.id]);assert.equal(filtered.status,'expired');
+    f.router.state.healthSubscribers.one.apps=null;
+    f.router.recordHealth({app:'codex',ok:false},'failure');
+    const protectedNotice=f.router.receive(to).messages.at(-1);
+    fs.writeFileSync(path.join(f.directory,'protected-threads.json'),JSON.stringify({threadIds:[to.threadId]}));
+    await f.router.processJob(f.router.state.jobs[protectedNotice.id]);assert.equal(protectedNotice.status,'expired');
+  }finally{f.close();}
+});
 test('legacy unconfirmed messages do not inflate current pending consumption counts; archive is not ack',async()=>{
   const f=fixture();try{
     const m=await f.router.send({from,to,text:'old notice',expectReply:false});await f.tick();delete m.protocolVersion;delete m.consumption;
