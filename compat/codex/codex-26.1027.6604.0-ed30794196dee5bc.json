@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "coreApiVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "app": "codex",
+  "id": "codex-26.1027.6604.0-ed30794196dee5bc",
+  "packageVersion": "26.1027.6604.0",
+  "capabilities": [
+    "read",
+    "send",
+    "settings",
+    "execution",
+    "mcp"
+  ],
+  "adapterFiles": [
+    "codex-main-execution.cjs",
+    "codex-main-mcp.cjs",
+    "codex-runtime.cjs",
+    "execution-policy.cjs",
+    "helper-binding.cjs",
+    "claude-attach-agent.js"
+  ],
+  "manifests": {
+    "execution": {
+      "version": "26.1027.6604.0",
+      "executableSha256": "ff17468adb9a25ef56e02a0d610273a060bd395bb564fb47d455367fe87ea9f0",
+      "chromeSha256": "d13978b9a3bb9eb629098483afcb2503db1cefcb50227ddbb162e0147f652423",
+      "asarSha256": "faacb124f33b792bd2c88fbe8b1215fb6869d81b145a919260e16ac11d9c1451",
+      "connectionModule": ".vite/build/early-bootstrap-339-6c8e32eb8f647578.js",
+      "connectionModuleId": 67295,
+      "managerClass": "_2",
+      "managerModuleId": 77158,
+      "helperRevision": "af0fc1fd7dcafe79"
+    },
+    "mcp": {
+      "version": "26.1027.6604.0",
+      "executableSha256": "ff17468adb9a25ef56e02a0d610273a060bd395bb564fb47d455367fe87ea9f0",
+      "chromeSha256": "d13978b9a3bb9eb629098483afcb2503db1cefcb50227ddbb162e0147f652423",
+      "asarSha256": "faacb124f33b792bd2c88fbe8b1215fb6869d81b145a919260e16ac11d9c1451",
+      "connectionModule": ".vite/build/early-bootstrap-339-6c8e32eb8f647578.js",
+      "connectionModuleId": 67295,
+      "reloadOnAttach": false,
+      "helperRevision": "c8326d9e4c561345"
+    }
+  },
+  "hashes": {
+    "executableSha256": "ff17468adb9a25ef56e02a0d610273a060bd395bb564fb47d455367fe87ea9f0",
+    "chromeSha256": "d13978b9a3bb9eb629098483afcb2503db1cefcb50227ddbb162e0147f652423",
+    "asarSha256": "faacb124f33b792bd2c88fbe8b1215fb6869d81b145a919260e16ac11d9c1451"
+  },
+  "adapterDigest": "3ffb92e6d3cf39f11ad8b1651956a0ed186509f29e726f6b8f0f45a3a02c34c8",
+  "revoked": false,
+  "evidence": {
+    "baseline": "Native isolated contract probes on Windows 2026-11-03",
+    "liveUpdateValidation": true,
+    "validated": [
+      "tools/list",
+      "read_thread",
+      "connection constructor module 67295",
+      "conversation manager _2",
+      "managed read/prepare with unchanged policy",
+      "MCP connection/status list without reload"
+    ],
+    "limitations": [
+      "No global MCP reload while protected chats are active",
+      "New conversation creation and changed permission values not exercised"
+    ],
+    "record": "docs/validation-codex-26.1027.6604.md"
+  }
+}

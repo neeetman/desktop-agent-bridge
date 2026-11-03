@@ -21,6 +21,9 @@
 
 ## Unreleased
 
+- Support the verified Codex 26.1027.6604.0 Windows package, including its renamed bootstrap chunk and conversation manager.
+- Normalize desktop executable basename casing across Win32 and CIM inventory so one running process retains its helper binding.
+
 - Block automatic launches and recovery when Windows process enumeration fails or omits the supervisor itself, preventing repeated GUI activation and duplicate service starts.
 
 - Debounce health alerts until three consecutive failures spanning at least 60 seconds; retain confirmed state across router restarts.

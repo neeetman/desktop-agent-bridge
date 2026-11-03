@@ -19,7 +19,8 @@ def cim_time(ticks):
 def desktop_rows(rows):
     return [{'app': 'claude' if row['Name'].lower() == 'claude.exe' else 'codex',
              'pid': row['ProcessId'], 'createdAt': row['Created'],
-             'executable': row['ExecutablePath']}
+             'executable': str(Path(row['ExecutablePath']).with_name(
+                 'Claude.exe' if row['Name'].lower() == 'claude.exe' else 'ChatGPT.exe'))}
             for row in rows
             if (Path(row['ExecutablePath']).parent / 'resources/app.asar').is_file()
             and not any(parent['ProcessId'] == row['ParentProcessId']

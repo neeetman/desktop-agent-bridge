@@ -33,6 +33,10 @@ class DesktopInventoryTests(unittest.TestCase):
             rows.append(dict(rows[0], ProcessId=13))
             # Preserve ambiguity for the coordinator; never pick a convenient PID.
             self.assertEqual(len(desktop_rows(rows)), 2)
+            lower = dict(rows[0], Name='claude.exe', ExecutablePath=str(root / 'desktop/claude.exe'))
+            # Win32 and CIM may spell the same loaded image differently. Keep
+            # the existing generation stable rather than replacing its helper.
+            self.assertEqual(desktop_rows([lower]), desktop_rows([rows[0]]))
 
     @unittest.skipUnless(os.name == 'nt', 'Win32 integration')
     def test_live_win32_snapshot_is_read_only_and_has_exact_process_identity(self):
