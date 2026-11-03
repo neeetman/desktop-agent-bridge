@@ -152,20 +152,43 @@ export class PeerRouter {
   async processJob(job) {
     const message = this.state.messages[job.id];
     if (!message) return;
+    if(job.status==='queued'&&message.kind==='decision_request'&&this.state.decisions[message.decisionId]?.status==='answered'){
+      job.status=message.status='completed';job.skippedReason='decision_already_answered';this.save();return;
+    }
     if (job.status === 'queued' || job.status === 'dispatching') {
       if (Date.now() > message.expiresAt && job.status === 'queued') { job.status = message.status = 'expired'; this.save(); return; }
       const snapshot = await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}`);
       if (snapshot.thread?.status?.type === 'active') return;
+      if(message.kind==='decision_answer'&&this.state.decisions[message.decisionId]?.status!=='answered')return;
       job.status = 'dispatching'; job.prompt ??= this.prompt(message); this.save();
       let task;
       try {
-        task = await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined }, `peer-router:${message.id}`);
+        if(message.kind==='decision_answer'){
+          const peer=this.state.decisions[message.decisionId];
+          if(!peer||!equal(peer.from,message.to)||peer.answerMessageId!==message.id)throw bad(400,'Decision answer does not match its requester');
+          const listed=await this.backendRequest(message.to.app,'/v1/decisions');
+          const pending=(listed.decisions??[]).filter(d=>d.threadId===message.to.threadId&&d.status==='pending');
+          const context=`${peer.question}\n${peer.context??''}`;
+          const matches=pending.filter(d=>context.includes(d.id));
+          if(!job.resumeDecisionId&&(matches.length>1||pending.length&&!matches.length))throw Object.assign(bad(409,'Peer answer needs an explicit callback decision ID in its question or context'),{code:'DECISION_LINK_REQUIRED'});
+          job.resumeDecisionId??=matches[0]?.id;
+          // Persist the exact link before dispatch; after a restart the callback may
+          // already be answered, so keep using its durable continuation result.
+          this.save();
+          if(job.resumeDecisionId){
+            const resumed=await this.backendRequest(message.to.app,`/v1/decisions/${job.resumeDecisionId}/respond`,'POST',{answer:peer.answer,peerDecisionId:peer.id,context:job.prompt,callbackMode:'peer'});
+            task=resumed.continuation;
+            if(!task)throw bad(502,'Decision continuation is missing');
+          }
+        }
+        task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined }, `peer-router:${message.id}`);
       } catch (error) {
-        if (error.status === 409) { job.status = 'queued'; this.save(); return; }
+        if (error.status === 409) { job.status = 'queued';job.lastError=error.message;job.lastErrorCode=error.code; this.save(); return; }
         if(error.status===503&&error.dispatchNotStarted){job.status='queued';job.blockedByUpdate=error.code;this.save();return;}
         job.status = message.status = 'unknown'; job.error = error.message; this.save(); return;
       }
       job.taskId = task.id; job.status = message.status = ['unknown', 'failed'].includes(task.status) ? task.status : 'delivered'; message.deliveredAt = new Date().toISOString(); this.save();
+      delete job.lastError;delete job.lastErrorCode;delete job.blockedByUpdate;this.save();
     }
     if (job.status !== 'delivered') return;
     const task = await this.backendRequest(message.to.app, `/v1/tasks/${job.taskId}`);
@@ -186,7 +209,9 @@ export class PeerRouter {
     if (this.ticking) return; this.ticking = true;
     try {
       const candidates = new Map();
-      for (const job of Object.values(this.state.jobs)) {
+      // Answers unblock paused tasks and may overtake older unsent notifications.
+      const jobs=Object.values(this.state.jobs).sort((a,b)=>Number(this.state.messages[b.id]?.kind==='decision_answer')-Number(this.state.messages[a.id]?.kind==='decision_answer'));
+      for (const job of jobs) {
         if (!['queued', 'dispatching', 'delivered'].includes(job.status)) continue;
         const message = this.state.messages[job.id], key = `${message.to.app}:${message.to.threadId}`;
         if (!candidates.has(key)) candidates.set(key, job);

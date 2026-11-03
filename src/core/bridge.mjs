@@ -242,18 +242,22 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     const current = resolutions.get(decisionId);
     if (current) {
       if (current.answer !== input.answer) throw fail(409, 'Decision is being answered differently');
+      if(current.peerDecisionId!==input.peerDecisionId||current.context!==input.context)throw fail(409,'Decision continuation context differs from the in-flight resolution');
       return current.promise;
     }
     const promise = resolveDecisionImpl(decisionId, input);
-    resolutions.set(decisionId, { answer: input.answer, promise });
+    resolutions.set(decisionId, { answer: input.answer, peerDecisionId:input.peerDecisionId, context:input.context, promise });
     try { return await promise; } finally { resolutions.delete(decisionId); }
   }
   async function resolveDecisionImpl(decisionId, input) {
     const decision = state.decisions[decisionId];
     if (!decision) throw fail(404, 'Unknown decision');
     nonempty(input.answer, 'answer');
+    if(input.peerDecisionId){nonempty(input.peerDecisionId,'peerDecisionId');nonempty(input.context,'context');}
     if (decision.status !== 'pending') {
       if (decision.answer !== input.answer) throw fail(409, 'Decision has already been answered differently');
+      if(input.peerDecisionId&&decision.peerDecisionId!==input.peerDecisionId)throw fail(409,'Decision was resumed by a different peer decision');
+      if(input.peerDecisionId&&decision.answerContext!==input.context)throw fail(409,'Decision continuation context differs from the stored resolution');
       return { decision, continuation: state.tasks[decision.continuationTaskId] ?? null };
     }
     const parent = state.tasks[decision.taskId];
@@ -265,11 +269,12 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     // Persist resolution before dispatch. The stable internal idempotency key prevents
     // a retry from generating a second continuation after transport uncertainty.
     decision.status = 'resolving'; decision.answer = input.answer; decision.answeredAt = new Date().toISOString();
+    if(input.peerDecisionId){decision.peerDecisionId=nonempty(input.peerDecisionId,'peerDecisionId');decision.answerContext=input.context??null;}
     if (parent) { parent.status = 'resuming'; delete parent.pendingDecisionId; }
     save();
     let continuation;
     try {
-      continuation = await dispatch({ threadId, hostId, prompt: `已选择「${input.answer}」，请继续原任务。`,
+      continuation = await dispatch({ threadId, hostId, prompt: input.peerDecisionId?nonempty(input.context,'context'):`已选择「${input.answer}」，请继续原任务。`,callbackMode:input.callbackMode,
         model: input.model ?? parent?.execution?.model, effort: input.effort ?? input.thinking ?? parent?.execution?.effort }, `decision:${decision.id}`, { resumesTaskId: parent?.id, operation: 'decision_resume' });
     } catch (error) {
       decision.status = 'pending'; if (parent) { parent.status = 'awaiting_decision'; parent.pendingDecisionId = decision.id; }
@@ -295,9 +300,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         const data = await body(req);
         return json(res, 202, signals.receive(data, token, root));
       }
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.2', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.3', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
       if (req.method === 'GET' && url.pathname === '/v1/compatibility') return json(res,200,await coordinator.doctor(state.provider==='claude'?'claude':'codex'));
-      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.2', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
+      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.3', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
       if (tools.provider === 'deepseek' && url.pathname === '/v1/workspaces') {
         if (req.method === 'GET') return json(res, 200, await tools.call('list_workspaces', {}));
         if (req.method === 'POST') { const input = await body(req); nonempty(input.path, 'path'); const result = await tools.call('create_workspace', input); return json(res, result.created ? 201 : 200, result); }

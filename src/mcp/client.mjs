@@ -88,7 +88,7 @@ if (argv.includes('--mcp')) {
     try {
       let result;
       switch (message.method) {
-        case 'initialize': result = { protocolVersion: message.params?.protocolVersion ?? '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: `${provider}-gui-bridge`, version: '0.8.2' } }; break;
+        case 'initialize': result = { protocolVersion: message.params?.protocolVersion ?? '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: `${provider}-gui-bridge`, version: '0.8.3' } }; break;
         case 'ping': result = {}; break;
         case 'tools/list': result = { tools: provider !== 'codex' ? tools.map(tool => ({ ...tool, name: tool.name.replace(/^codex_/, `${provider}_`), description: tool.description.replaceAll('Codex', provider === 'claude' ? 'Claude' : 'DeepSeek').replaceAll('codex_', `${provider}_`) })) : tools }; break;
         case 'tools/call': {

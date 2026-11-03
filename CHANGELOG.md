@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.3 — 2026-11-03
+
+- Resume an explicitly linked callback decision through its durable continuation when a peer answer arrives, instead of blocking behind the paused task.
+- Prioritize decision answers over unsent notifications, skip already answered queued requests, and preserve continuation identity across restarts without replaying unknown native outcomes.
+
 ## 0.8.2 — 2026-11-03
 
 - Support the verified Claude 4.4212.0.0 Windows build and its session-manager worker PID contract.
