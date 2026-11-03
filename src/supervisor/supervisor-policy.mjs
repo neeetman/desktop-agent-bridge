@@ -16,6 +16,12 @@ export function matchesScript(row, script, allowRelative = false) {
   const name = normalized(path.basename(script));
   return command.includes(` ${name} `) || command.endsWith(` ${name}`);
 }
+export function serviceProcess(rows, pid, connectionPid, script, retiredPid) {
+  // Windows venv Python may keep a launcher alive while its child writes the heartbeat.
+  const connected = rows.get(connectionPid);
+  if (connected && connected.ProcessId !== retiredPid && matchesScript(connected, script, true)) return connected;
+  return rows.get(pid);
+}
 export function shouldRecover({ alive, healthy, ageMs, failures, graceMs = 90000 }) {
   if (!alive) return 'missing';
   if (healthy) return null;

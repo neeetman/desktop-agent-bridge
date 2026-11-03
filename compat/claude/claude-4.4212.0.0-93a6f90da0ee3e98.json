@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "coreApiVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "app": "claude",
+  "id": "claude-4.4212.0.0-93a6f90da0ee3e98",
+  "packageVersion": "4.4212.0.0",
+  "capabilities": [
+    "read",
+    "send",
+    "identity"
+  ],
+  "adapterFiles": [
+    "claude-main-attach.cjs",
+    "claude-renderer.mjs",
+    "helper-binding.cjs",
+    "claude-attach-agent.js"
+  ],
+  "manifests": {
+    "claude": {
+      "desktopVersion": "4.4212.0",
+      "executableSha256": "f604ea91b306f0a92d8be8af7fdf2ad91c25a520da5aee3178adef593f89bde9",
+      "asarSha256": "f0058d0b13c4787a2f2c1684bbb48b7352efffc68a1e35d8ca574698afa90a63",
+      "fridaVersion": "17.9.1",
+      "sessionModule": ".vite/build/index.chunk-DWYQ0V6d.js",
+      "transport": "main-renderer-rpc",
+      "workerPidField": "cliPid"
+    }
+  },
+  "hashes": {
+    "executableSha256": "f604ea91b306f0a92d8be8af7fdf2ad91c25a520da5aee3178adef593f89bde9",
+    "asarSha256": "f0058d0b13c4787a2f2c1684bbb48b7352efffc68a1e35d8ca574698afa90a63"
+  },
+  "adapterDigest": "e030e8ca989f40354a4ae88946925402e06cce8c290ed8736693624db0b215bc",
+  "revoked": false,
+  "evidence": {
+    "baseline": "Claude 4.4212.0 native main/renderer contract; dedicated local canary 2026-11-03",
+    "liveUpdateValidation": true,
+    "validated": [
+      "getSessionList",
+      "getSession",
+      "start",
+      "sendMessage",
+      "getTranscriptTail",
+      "getTranscriptPage",
+      "worker identity via cliPid"
+    ],
+    "limitations": [
+      "Desktop restart and Windows logon recovery not exercised",
+      "Permission and model mutation not exercised"
+    ],
+    "record": "docs/validation-claude-4.4212.md"
+  }
+}

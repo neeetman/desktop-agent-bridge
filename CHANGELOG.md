@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 — 2026-11-03
+
+- Support the verified Claude 4.4212.0.0 Windows build and its session-manager worker PID contract.
+- Pass the MCP server name when reconnecting Claude and surface native reconnect failures.
+- Preserve registered builds and revocation flags when refreshing source revisions.
+
+
 ## Unreleased
 
 - Block automatic launches and recovery when Windows process enumeration fails or omits the supervisor itself, preventing repeated GUI activation and duplicate service starts.

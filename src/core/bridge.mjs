@@ -38,13 +38,20 @@ async function body(req) {
   catch { throw fail(400, 'Invalid JSON'); }
 }
 
-export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000, enableIpc = true }) {
+export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000, enableIpc = true, preflight }) {
   fs.mkdirSync(stateDir, { recursive: true });
   const stateFile = path.join(stateDir, 'state.json');
   const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : {
     schemaVersion: 1, token: crypto.randomBytes(32).toString('hex'), tasks: {}, watches: {}, idempotency: {},
   };
   const save = () => writeJson(stateFile, state);
+  if (preflight) {
+    // Compatibility bindings need credentials before the first native probe.
+    // Do not publish a PID/address until the service has actually started.
+    save();
+    writeJson(path.join(stateDir, 'connection.json'), { token: state.token, initializing: true });
+    try { await preflight(); } catch (error) { tools.close(); throw error; }
+  }
   state.provider = tools.provider ?? 'codex';
   // A crash during native dispatch must never lead to an automatic duplicate send.
   for (const task of Object.values(state.tasks)) if (['prepared', 'dispatching'].includes(task.status)) task.status = 'unknown';
@@ -288,9 +295,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         const data = await body(req);
         return json(res, 202, signals.receive(data, token, root));
       }
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.1', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.2', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
       if (req.method === 'GET' && url.pathname === '/v1/compatibility') return json(res,200,await coordinator.doctor(state.provider==='claude'?'claude':'codex'));
-      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.1', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
+      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.2', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
       if (tools.provider === 'deepseek' && url.pathname === '/v1/workspaces') {
         if (req.method === 'GET') return json(res, 200, await tools.call('list_workspaces', {}));
         if (req.method === 'POST') { const input = await body(req); nonempty(input.path, 'path'); const result = await tools.call('create_workspace', input); return json(res, result.created ? 201 : 200, result); }
@@ -393,8 +400,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   const flags = Object.fromEntries(process.argv.slice(2).reduce((pairs, item, i, all) => item.startsWith('--') ? [...pairs, [item.slice(2), all[i + 1]]] : pairs, []));
   const tools = new DesktopTools(flags.pipe ?? null, flags['caller-thread'] ?? process.env.CODEX_THREAD_ID);
   // Probe the real desktop before accepting clients; do not start another app-server.
-  await tools.listTools();
-  const bridge = await startBridge({ tools, stateDir: path.resolve(flags.state ?? fileURLToPath(projectURL("runtime"))), port: Number(flags.port ?? 43127) });
+  const bridge = await startBridge({ tools, stateDir: path.resolve(flags.state ?? fileURLToPath(projectURL("runtime"))), port: Number(flags.port ?? 43127), preflight: () => tools.listTools() });
   console.log(`Codex GUI bridge listening at ${bridge.baseUrl}`);
   console.log('Credentials saved to connection.json in the state directory.');
   const stop = () => bridge.close().then(() => process.exit(0));

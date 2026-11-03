@@ -82,7 +82,9 @@ function install(config) {
             return;
           }
           const sessions = [...manager.sessions.values()];
-          const matches = sessions.filter(session => session.query?.transport?.process?.pid === request.pid);
+          if (!Number.isSafeInteger(request.pid) || request.pid <= 0) throw new Error('A positive worker PID is required');
+          const workerPid = session => compatibility.workerPidField === 'cliPid' ? session.cliPid : session.query?.transport?.process?.pid;
+          const matches = sessions.filter(session => workerPid(session) === request.pid);
           socket.end(JSON.stringify(matches.length === 1 ? { app: 'claude', threadId: matches[0].sessionId, evidence: 'desktop-native-worker-pid' } : { app: 'claude', needsThreadId: true, workerMatches: matches.length }) + '\n');
         }
         else if (request.method === 'reload') {

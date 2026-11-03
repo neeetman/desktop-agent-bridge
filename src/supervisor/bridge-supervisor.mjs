@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-import { backoffMs, childEnvironment, matchesScript, shouldRecover, restoreAppState, requireProcessSnapshot, installedDesktopExecutable,runningDesktopCandidates } from './supervisor-policy.mjs';
+import { backoffMs, childEnvironment, matchesScript, serviceProcess, shouldRecover, restoreAppState, requireProcessSnapshot, installedDesktopExecutable,runningDesktopCandidates } from './supervisor-policy.mjs';
 import { codexMcp } from '../adapters/codex/codex-mcp-control.mjs';
 import { lifecycle } from '../adapters/claude/claude-lifecycle.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
@@ -92,7 +92,7 @@ export class Supervisor {
   }
   async ensureService(service,rows){
     const connection=read(sourcePath(ROOT,service.connection));
-    const candidate=rows.get(service.pid)??rows.get(connection?.pid);
+    const candidate=serviceProcess(rows,service.pid,connection?.pid,sourcePath(ROOT,service.script),service.retiredPid);
     const valid=candidate?.ProcessId!==service.retiredPid&&matchesScript(candidate,sourcePath(ROOT,service.script),true);
     if(valid){
       if(service.pid!==candidate.ProcessId){service.pid=candidate.ProcessId;service.startedAt=Date.now();record('service.adopted',{name:service.name,pid:service.pid});}
@@ -128,7 +128,7 @@ export class Supervisor {
       args.push('--caller-thread',caller,'--state',sourcePath(ROOT,'runtime'));
     }
     if(service.name==='claude-attach'&&!this.apps.get('claude').pid&&!this.apps.get('claude').closedByUser)args.push('--launch',this.apps.get('claude').executable);
-    const child=this.launch(service.python?config.python:config.node,args,service.name);
+    const child=this.launch(service.python?config.pythonw:config.node,args,service.name);
     service.child=child;service.pid=child.pid;service.retiredPid=null;service.startedAt=Date.now();service.state='starting';service.failures++;
     service.nextStart=Date.now()+backoffMs(service.failures);
     child.on('exit',(code,signal)=>{service.lastError=code===0?null:`Exited ${code??signal}`;record('service.process_exit',{name:service.name,pid:child.pid,code,signal});});
@@ -139,7 +139,7 @@ export class Supervisor {
     const key=JSON.stringify(pids);if(key===this.appWatcherKey&&this.appWatcher?.exitCode===null)return;
     if(this.appWatcher?.exitCode===null)this.appWatcher.kill();this.appWatcherKey=key;
     if(!Object.keys(pids).length)return;
-    const child=spawn(config.python,[sourcePath(ROOT,'app-exit-watch.py'),key],{env:environment,windowsHide:true,stdio:['ignore','pipe','ignore']});this.appWatcher=child;child.unref();
+    const child=spawn(config.pythonw,[sourcePath(ROOT,'app-exit-watch.py'),key],{env:environment,windowsHide:true,stdio:['ignore','pipe','ignore']});this.appWatcher=child;child.unref();
     let buffer='';child.stdout.on('data',chunk=>{
       buffer+=chunk.toString('utf8');let index;
       while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);try{const event=JSON.parse(line),app=this.apps.get(event.app);if(app?.pid===event.pid||(!app?.pid&&app?.previousPid===event.pid)){app.closedByUser=event.clean;app.lastExitCode=event.exitCode;app.nextStart=Date.now()+backoffMs(++app.failures,2000);record('desktop.exited',event);}}catch{}}

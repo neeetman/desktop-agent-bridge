@@ -16,6 +16,19 @@ function removeTestDirectory(directory) {
   assert.ok(!relative.startsWith('..') && !path.isAbsolute(relative) && path.basename(resolved).startsWith('codex-bridge-'));
   fs.rmSync(resolved, { recursive: true, force: true });
 }
+test('cold startup creates credentials before guarded native preflight and publishes readiness afterwards',async()=>{
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-bootstrap-'));let closed=false;
+ const tools={callerThread:'test',close(){closed=true;}};
+ let token;
+ const bridge=await startBridge({tools,stateDir,port:0,enableIpc:false,preflight:async()=>{
+  const connection=JSON.parse(fs.readFileSync(path.join(stateDir,'connection.json')));
+  token=connection.token;assert.ok(token);assert.equal(connection.initializing,true);assert.equal(connection.pid,undefined);assert.equal(connection.baseUrl,undefined);
+ }});
+ try{const connection=JSON.parse(fs.readFileSync(path.join(stateDir,'connection.json')));assert.equal(connection.token,token);assert.equal(connection.pid,process.pid);assert.equal(connection.baseUrl,bridge.baseUrl);}finally{await bridge.close();removeTestDirectory(stateDir);}
+ assert.equal(closed,true);
+ const failed=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-bootstrap-'));closed=false;
+ try{await assert.rejects(startBridge({tools,stateDir:failed,port:0,enableIpc:false,preflight:async()=>{throw Error('native unavailable');}}),/native unavailable/);assert.equal(closed,true);assert.equal(JSON.parse(fs.readFileSync(path.join(failed,'connection.json'))).pid,undefined);}finally{removeTestDirectory(failed);}
+});
 test('reconnect discovers a new desktop pipe; a disconnected mutation is never replayed', async () => {
   const makePath=()=>process.platform==='win32'?`\\\\.\\pipe\\codex-bridge-test-${crypto.randomUUID()}`:path.join(os.tmpdir(),`codex-bridge-${crypto.randomUUID()}.sock`);
   const firstPath=makePath(),secondPath=makePath(),sockets=new Set();let calls=0;

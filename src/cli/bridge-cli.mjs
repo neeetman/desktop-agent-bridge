@@ -6,6 +6,13 @@ import path from 'node:path';
 import {codexMcp} from '../adapters/codex/codex-mcp-control.mjs';
 import {lifecycle} from '../adapters/claude/claude-lifecycle.mjs';
 const option=(args,name)=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
+export async function refreshClaudeMcp(thread,server='desktop-bridge',request=lifecycle){
+ if(!thread||thread.startsWith('--')||!server||server.startsWith('--'))throw compatError('INVALID_ARGUMENT','Claude refresh requires --thread with an exact idle session ID and --server with an MCP server name');
+ const nativeResult=await request('native',{payload:{nativeMethod:'mcpReconnect',args:[thread,server]}});
+ if(nativeResult.result?.error)throw compatError('NATIVE_RECONNECT_FAILED',nativeResult.result.error);
+ if(nativeResult.result?.queued)return {requested:true,deferred:true,nativeResult,workerVerificationRequired:true};
+ return {requested:true,nativeResult,workerVerificationRequired:true};
+}
 export async function main(args){
  try{
   let result;const app=option(args,'--app');
@@ -23,7 +30,7 @@ export async function main(args){
     else if(args[1]==='activate'){if(!id||!args.includes('--when-idle'))throw compatError('INVALID_ARGUMENT','activate requires --profile and --when-idle');result=await activateProfile(app,id);}
     else if(args[1]==='rollback'){const previous=coordinator.state().apps[app]?.previousProfileId;if(!previous)throw compatError('NO_ROLLBACK','No previous profile is recorded');result=await activateProfile(app,previous);}
     else if(args[1]==='recover')result=await coordinator.recover(app);
-    else if(args[1]==='refresh-mcp'){if(app==='codex')result=await codexMcp('reload');else{const thread=option(args,'--thread');if(!thread)throw compatError('INVALID_ARGUMENT','Claude refresh requires --thread with an exact idle session ID');result={requested:true,nativeResult:await lifecycle('native',{payload:{nativeMethod:'mcpReconnect',args:[thread]}}),workerVerificationRequired:true};}}
+    else if(args[1]==='refresh-mcp'){if(app==='codex')result=await codexMcp('reload');else result=await refreshClaudeMcp(option(args,'--thread'),option(args,'--server')??'desktop-bridge');}
     else throw compatError('INVALID_ARGUMENT','Unknown compat command');
    }
   }else if(args[0]==='install'){

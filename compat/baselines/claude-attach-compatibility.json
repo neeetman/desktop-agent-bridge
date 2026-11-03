@@ -1,8 +1,9 @@
 {
-  "desktopVersion": "4.29.0",
-  "executableSha256": "baa1dec1146dc4e11ed1c0456d6817e6eb44b87256fe0e367a9124dedac3f5e6",
-  "asarSha256": "bef5dfbee42e64ec683ccfe8aaffd8518e99b7277a165202033d696c99e7d2b2",
+  "desktopVersion": "4.4212.0",
+  "executableSha256": "f604ea91b306f0a92d8be8af7fdf2ad91c25a520da5aee3178adef593f89bde9",
+  "asarSha256": "f0058d0b13c4787a2f2c1684bbb48b7352efffc68a1e35d8ca574698afa90a63",
   "fridaVersion": "17.9.1",
-  "sessionModule": ".vite/build/index.chunk-B5N0558G.js",
-  "transport": "main-renderer-rpc"
+  "sessionModule": ".vite/build/index.chunk-DWYQ0V6d.js",
+  "transport": "main-renderer-rpc",
+  "workerPidField": "cliPid"
 }

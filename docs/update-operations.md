@@ -52,7 +52,7 @@ recover 只能取消尚未开始附着的 waitingIdle。附着开始后失败或
 
 ```powershell
 desktop-agent-bridge compat refresh-mcp --app codex
-desktop-agent-bridge compat refresh-mcp --app claude --thread "<精确空闲会话ID>"
+desktop-agent-bridge compat refresh-mcp --app claude --thread "<精确空闲会话ID>" --server desktop-bridge
 ```
 
 Codex 当前使用全局 reload：有任何配置的 protected 会话、活动/待审批线程或不能确认的原生状态时拒绝。Claude 只请求指定空闲会话的 mcpReconnect。原生刷新请求成功仍需该会话再调用 bridge_self 核验实际 clientRevision/toolCatalogDigest。

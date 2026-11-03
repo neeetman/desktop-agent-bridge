@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.1**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。
+Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.2**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。
 
 会话可以通过 MCP 主动互发消息、接收回复、请求决策，并在答复到达时唤醒原会话。支持按标题搜索后用精确 ID 路由、多会话队列、项目/工作区、模型与 effort 读回，以及 Codex 托管会话的下一轮权限设置。
 
@@ -46,6 +46,7 @@ Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接
 |---|---|---|
 | Codex Windows x64 | `26.1027.3384.0` | 两份兼容清单校验 EXE、chrome.dll、app.asar |
 | Claude Windows x64 | `4.29.0` | 兼容清单校验 EXE、app.asar |
+| Claude Windows x64 | `4.4212.0`（Appx `4.4212.0.0`） | 已验证会话与 worker 身份契约 |
 | DeepSeek Harness | `0.2.1-rc.3` | 原生 Cordis Host 插件；升级后重新验证契约 |
 
 Frida 固定为 `17.9.1`。未知 Codex/Claude 文件哈希会拒绝附着；不要通过直接更新哈希来声称兼容。当前只支持本机 Windows 桌面环境，HTTP 服务只监听 `127.0.0.1`。

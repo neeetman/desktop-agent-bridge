@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "coreApiVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "app": "claude",
+  "id": "claude-4.29.0-0cd7be3601771941",
+  "packageVersion": "4.29.0",
+  "capabilities": [
+    "read",
+    "send",
+    "identity"
+  ],
+  "adapterFiles": [
+    "claude-main-attach.cjs",
+    "claude-renderer.mjs",
+    "helper-binding.cjs",
+    "claude-attach-agent.js"
+  ],
+  "manifests": {
+    "claude": {
+      "desktopVersion": "4.29.0",
+      "executableSha256": "baa1dec1146dc4e11ed1c0456d6817e6eb44b87256fe0e367a9124dedac3f5e6",
+      "asarSha256": "bef5dfbee42e64ec683ccfe8aaffd8518e99b7277a165202033d696c99e7d2b2",
+      "fridaVersion": "17.9.1",
+      "sessionModule": ".vite/build/index.chunk-B5N0558G.js",
+      "transport": "main-renderer-rpc"
+    }
+  },
+  "hashes": {
+    "executableSha256": "baa1dec1146dc4e11ed1c0456d6817e6eb44b87256fe0e367a9124dedac3f5e6",
+    "asarSha256": "bef5dfbee42e64ec683ccfe8aaffd8518e99b7277a165202033d696c99e7d2b2"
+  },
+  "adapterDigest": "e030e8ca989f40354a4ae88946925402e06cce8c290ed8736693624db0b215bc",
+  "revoked": false,
+  "evidence": {
+    "baseline": "v0.7 desktop contract; v0.8 coordinator offline tests",
+    "liveUpdateValidation": false
+  }
+}

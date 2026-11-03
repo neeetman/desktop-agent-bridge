@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "profiles": [
     "compat/codex/codex-26.1027.3384.0-b833a39b336d7294.json",
-    "compat/claude/claude-4.29.0-3c9689ebc5baf735.json"
+    "compat/claude/claude-4.29.0-0cd7be3601771941.json",
+    "compat/claude/claude-4.4212.0.0-93a6f90da0ee3e98.json"
   ]
 }
