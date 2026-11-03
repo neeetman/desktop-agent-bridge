@@ -76,8 +76,17 @@ export class Compatibility {
     const processes=inventory.processes.filter(row=>row.app===app);if(processes.length!==1)throw compatError(processes.length?'AMBIGUOUS_DESKTOP':'DESKTOP_NOT_RUNNING',`Exactly one ${app} desktop main process is required`);
     const processInfo=processes[0],generation=digest(canonical(processInfo));const old=state.apps[app]??{};
     const {files,stamp}=this.fileFingerprint(processInfo.executable,app);
-    if(old.generation===generation&&old.fileStamp&&old.fileStamp!==stamp)throw compatError('AWAITING_RESTART','Desktop files changed within the running process generation');
-    const hashes=old.generation===generation&&old.fileStamp===stamp?old.runningBuild.hashes:Object.fromEntries(Object.entries(files).map(([key,file])=>[key,digest(fs.readFileSync(file))]));
+    let hashes;
+    if(old.generation===generation&&old.fileStamp&&old.fileStamp!==stamp){
+      // Windows ctime also changes for metadata updates. Revalidate every byte
+      // only when path, file ID, size and mtime stayed identical; real file
+      // replacement or content changes still require a new desktop process.
+      const contentStamp=value=>canonical(JSON.parse(value).map(row=>row.slice(0,-1)));
+      if(contentStamp(old.fileStamp)!==contentStamp(stamp))throw compatError('AWAITING_RESTART','Desktop files changed within the running process generation');
+      hashes=Object.fromEntries(Object.entries(files).map(([key,file])=>[key,digest(fs.readFileSync(file))]));
+      if(canonical(hashes)!==canonical(old.runningBuild?.hashes))throw compatError('AWAITING_RESTART','Desktop files changed within the running process generation');
+    }
+    hashes??=old.generation===generation&&old.fileStamp===stamp?old.runningBuild.hashes:Object.fromEntries(Object.entries(files).map(([key,file])=>[key,digest(fs.readFileSync(file))]));
     const matches=this.profiles().filter(row=>row.profile.app===app&&Object.entries(hashes).every(([key,value])=>row.profile.hashes[key]===value));
     let chosen=matches.find(row=>row.profile.id===(requestedId??(old.generation===generation?old.profileId:undefined)))??(!requestedId?matches.find(row=>!row.profile.revoked):undefined);
     if(!chosen)throw compatError('BUILD_UNSUPPORTED',`No validated ${app} profile matches the running desktop bytes`,{runningBuild:{...processInfo,hashes},fileStamp:stamp,generation});

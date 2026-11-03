@@ -24,6 +24,24 @@ function fixture(){
 test('passive doctor verifies bytes without creating installation/state or exposing credentials',async()=>{const f=fixture();try{const before=fs.readdirSync(path.join(f.root,'runtime'));const result=await f.manager.doctor('codex');assert.equal(result.apps.codex.profileId,'test-v1');assert.equal(result.apps.codex.installedBuild.version,'2.0.0');assert.equal(result.apps.codex.runningBuild.packageVersion,'1.0.0');assert.deepEqual(fs.readdirSync(path.join(f.root,'runtime')),before);assert.ok(!JSON.stringify(result).includes('fixture-secret'));}finally{f.close();}});
 test('same PID recovers after unsupported hashes are added; capability revocation is immediately enforced',async()=>{const f=fixture();try{f.update({hashes:{...f.profile.hashes,executableSha256:sha('wrong')},manifests:{execution:{...f.profile.hashes,executableSha256:sha('wrong')}}});await assert.rejects(f.manager.resolve('codex','read'),{code:'BUILD_UNSUPPORTED'});f.update({hashes:{...f.profile.hashes,executableSha256:sha('exe')},manifests:{execution:{...f.profile.hashes,executableSha256:sha('exe')}}});const result=await f.manager.resolve('codex','send');assert.equal(result.runningBuild.pid,101);f.update({revoked:true});await assert.rejects(f.manager.resolve('codex','read'),{code:'PROFILE_REVOKED'});}finally{f.close();}});
 test('PID reuse changes generation; same-process replacement of bytes requires restart',async()=>{const f=fixture();try{const first=await f.manager.resolve('codex','read');f.inventory().processes[0].createdAt='second';const next=await f.manager.resolve('codex','read');assert.notEqual(first.binding.generation,next.binding.generation);fs.writeFileSync(path.join(f.appdir,'resources/app.asar'),'changed in place');await assert.rejects(f.manager.resolve('codex','read'),{code:'AWAITING_RESTART'});}finally{f.close();}});
+test('ctime-only changes rehash native files without replacing bindings; changed bytes still require restart',async()=>{
+ const f=fixture();try{
+  const first=await f.manager.resolve('codex','read');
+  const original=f.manager.fileFingerprint.bind(f.manager), baseline=original(f.inventory().processes[0].executable,'codex');
+  const rows=JSON.parse(baseline.stamp);rows[0][5]=String(BigInt(rows[0][5])+1n);
+  const metadataStamp=JSON.stringify(rows);
+  f.manager.fileFingerprint=()=>({...baseline,stamp:metadataStamp});
+  const refreshed=await f.manager.resolve('codex','read');
+  assert.deepEqual(refreshed.binding,first.binding);
+  assert.equal(f.manager.state().apps.codex.fileStamp,metadataStamp);
+  // Even with unchanged path, ID, size and mtime hints, bytes must match.
+  rows[0][5]=String(BigInt(rows[0][5])+1n);
+  f.manager.fileFingerprint=()=>({...baseline,stamp:JSON.stringify(rows)});
+  fs.writeFileSync(path.join(f.appdir,'app.exe'),'bad');
+  await assert.rejects(f.manager.resolve('codex','send'),{code:'AWAITING_RESTART'});
+ }finally{f.close();}
+});
+
 test('adapter tampering and copied installation identity are rejected',async()=>{const f=fixture();try{const selected=await f.manager.resolve('codex','read');fs.appendFileSync(path.join(f.root,'adapter.cjs'),'changed');assert.ok((await f.manager.resolve('codex','read')).binding);fs.appendFileSync(path.join(selected.adapterRoot,'adapter.cjs'),'tampered snapshot');await assert.rejects(f.manager.resolve('codex','read'),{code:'ADAPTER_STALE'});atomicJson(path.join(f.root,'runtime/updates/installation.json'),{installationId:'old',root:'other-directory'});await assert.rejects(f.manager.resolve('codex','read'),{code:'IDENTITY_MISMATCH'});}finally{f.close();}});
 test('all unvalidated desktop write paths refuse before touching native transport',async()=>{let nativeCalls=0;const tools=new DesktopTools('fixture','caller',{guardRuntime:async()=>{throw compatError('BUILD_UNSUPPORTED','fixture');}});tools.rpc.request=async()=>{nativeCalls++;};for(const name of ['send_message_to_thread','create_thread'])await assert.rejects(tools.rawCall(name,{}),{code:'BUILD_UNSUPPORTED'});await assert.rejects(tools.readSettings('unmanaged'),{code:'BUILD_UNSUPPORTED'});assert.equal(nativeCalls,0);});
 test('leases and protected chats block activation before helper replacement',async()=>{const f=fixture();try{const selected=await f.manager.resolve('codex','read',{lease:true});let attaches=0;await assert.rejects(f.manager.activate('codex','test-v1',{idleProbe:async()=>({idle:true,authoritative:true}),attachProbe:async()=>{attaches++;}}),{code:'REFRESH_DEFERRED_BUSY'});await f.manager.release(selected.leaseId);atomicJson(path.join(f.root,'runtime/router/protected-threads.json'),{threadIds:['protected']});await assert.rejects(f.manager.activate('codex','test-v1'),{code:'REFRESH_DEFERRED_PROTECTED'});assert.equal(attaches,0);}finally{f.close();}});
