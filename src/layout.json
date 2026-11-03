@@ -38,6 +38,7 @@
     "supervisor-status.mjs": "src/supervisor/supervisor-status.mjs",
     "bridge-cli.mjs": "src/cli/bridge-cli.mjs",
     "app-exit-watch.py": "scripts/runtime/app-exit-watch.py",
+    "desktop_inventory.py": "scripts/runtime/desktop_inventory.py",
     "attachment_runtime.py": "scripts/runtime/attachment_runtime.py",
     "native_monitor.py": "scripts/runtime/native_monitor.py",
     "native-attach.py": "scripts/runtime/native-attach.py",

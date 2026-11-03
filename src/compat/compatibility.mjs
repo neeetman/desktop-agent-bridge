@@ -28,10 +28,11 @@ export function validateProfile(profile){
 }
 export async function desktopInventory(){
   if(process.platform!=='win32')return {processes:[],installed:[]};
-  const command="$rows=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('ChatGPT.exe','Claude.exe') -and $_.SessionId -eq (Get-Process -Id $PID).SessionId } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,@{Name='Created';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}}); $packages=@(@('OpenAI.Codex','Claude') | ForEach-Object { Get-AppxPackage -Name $_ | Sort-Object Version -Descending | Select-Object -First 1 Name,@{Name='Version';Expression={$_.Version.ToString()}},InstallLocation }); @{processes=$rows;installed=$packages} | ConvertTo-Json -Depth 5 -Compress";
-  const {stdout}=await run('powershell.exe',['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,timeout:15000,maxBuffer:2*1024*1024});
-  const data=JSON.parse(stdout.replace(/^\uFEFF/,''));const rows=data.processes??[];
-  return {processes:rows.filter(row=>row.ExecutablePath&&fs.existsSync(path.join(path.dirname(row.ExecutablePath),'resources/app.asar'))&&!rows.some(parent=>parent.ProcessId===row.ParentProcessId&&parent.ExecutablePath===row.ExecutablePath)).map(row=>({app:row.Name.toLowerCase()==='claude.exe'?'claude':'codex',pid:row.ProcessId,createdAt:row.Created,executable:row.ExecutablePath})),installed:(data.installed??[]).map(row=>({app:row.Name==='Claude'?'claude':'codex',version:String(row.Version),directory:row.InstallLocation}))};
+  let python='python';try{python=readJson(path.join(ROOT,'runtime/supervisor/config.json')).python??python;}catch{}
+  const {stdout}=await run(python,[sourcePath(ROOT,'desktop_inventory.py')],{windowsHide:true,timeout:5000,maxBuffer:2*1024*1024});
+  const data=JSON.parse(stdout.replace(/^\uFEFF/,''));
+  if(!Array.isArray(data.processes)||!Array.isArray(data.installed))throw compatError('PROCESS_SNAPSHOT_UNAVAILABLE','Invalid native desktop inventory');
+  return data;
 }
 export class Compatibility {
   constructor(root=ROOT,{inventory=desktopInventory,now=Date.now,alive}={}){this.root=path.resolve(root);this.directory=path.join(this.root,'runtime/updates');this.file=path.join(this.directory,'state.json');this.inventory=inventory;this.now=now;this.alive=alive??(pid=>{try{process.kill(pid,0);return true;}catch{return false;}});}
