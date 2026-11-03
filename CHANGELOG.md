@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.4 — 2026-11-03
+
+- Deliver peer notifications to idle chats paused on callback decisions without resolving the decision or completing its parent task.
+- Discover desktops through Win32 instead of WMI and coalesce concurrent inventory queries; completed and failed inventories are not cached.
+- Stop health notifications from waking archived chats and expire queued notices after unsubscribe.
+- Forward task callbacks to their creating peer and prevent duplicate startups from overwriting live connection files.
+
 ## 0.8.3 — 2026-11-03
 
 - Resume an explicitly linked callback decision through its durable continuation when a peer answer arrives, instead of blocking behind the paused task.

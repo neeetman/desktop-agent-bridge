@@ -11,3 +11,11 @@ Missing or ambiguous callback links remain queued with `DECISION_LINK_REQUIRED`.
 Regression coverage uses a real HTTP backend and router with simulated native transport. It covers the original queue deadlock, active-turn deferral, the same thread/parent relationship, restart after native acceptance before router persistence, missing linkage, conflicting resolutions and unknown outcomes without replay.
 
 Version 0.8.3 was deployed locally on 2026-11-03 after 107 Node tests, 15 Python tests and source checks passed. The two previously blocked live answers resumed their original callback tasks and native chats; both recipients explicitly acknowledged consumption during deployment verification. Only the local HTTP/router services were restarted; native desktop apps and helpers stayed running. Runtime records and credentials remain outside Git.
+
+## Notifications while a callback decision is pending (0.8.4)
+
+An informational peer message (`expectReply=false`) may be delivered to an idle chat that has exactly one HTTP task waiting on a pending callback decision. It is recorded as a separate `peer_notification` task with `pausedTaskId`, rather than as a decision continuation. Completing the notification does not complete its paused parent, choose an option, or change the original decision. Active native turns and other running/unknown tasks still prevent a new notification. Existing task permissions are retained.
+
+The desktop inventory read path coalesces concurrent in-flight queries in each Node process and discovers target processes through Win32 Toolhelp instead of WMI. It re-queries after every completed or failed batch; it does not return a cached successful inventory after a later failure.
+
+Local deployment verification on 2026-11-03: 109 Node tests, 15 Python tests and source checks passed. Both affected workers received and explicitly acknowledged their first previously blocked notifications. Codex and Claude native health probes recovered, and all six enabled background services were healthy. Later notifications remained subject to normal idle-session delivery; pending callback decisions were not answered by this repair.

@@ -197,8 +197,12 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     else if(execution.cwd)throw fail(400, 'This backend cannot safely create a session at an arbitrary cwd');
     // Another identical caller may have reserved its task during asynchronous preflight.
     if(idempotencyKey&&state.idempotency[idempotencyKey])return dispatch(input,idempotencyKey,internal);
-    if (input.threadId && Object.values(state.tasks).some(task => task.threadId === input.threadId && task.hostId === (input.hostId ?? 'local') && active.has(task.status) && task.id !== internal.resumesTaskId)) throw fail(409, 'A bridge task is already pending for this session');
-    const task = { id: crypto.randomUUID(), status: 'prepared', operation: internal.operation ?? 'task', resumesTaskId: internal.resumesTaskId, createdAt: new Date().toISOString(), hostId: input.hostId ?? 'local', threadId: input.threadId ?? null, baselineTurnIds: [], prompt: input.prompt, execution, callbackMode:input.callbackMode==='peer'?'peer':'external', taskVersion:input.taskVersion??null };
+    if(input.peerNotification===true&&input.callbackMode==='peer'&&input.threadId){
+      const pending=Object.values(state.tasks).filter(t=>t.threadId===input.threadId&&t.hostId===(input.hostId??'local')&&active.has(t.status));
+      if(pending.length===1&&pending[0].status==='awaiting_decision'&&state.decisions[pending[0].pendingDecisionId]?.status==='pending')internal={...internal,pausedTaskId:pending[0].id,operation:'peer_notification'};
+    }
+    if (input.threadId && Object.values(state.tasks).some(task => task.threadId === input.threadId && task.hostId === (input.hostId ?? 'local') && active.has(task.status) && task.id !== internal.resumesTaskId && task.id !== internal.pausedTaskId)) throw fail(409, 'A bridge task is already pending for this session');
+    const task = { id: crypto.randomUUID(), status: 'prepared', operation: internal.operation ?? 'task', resumesTaskId: internal.resumesTaskId, pausedTaskId:internal.pausedTaskId, createdAt: new Date().toISOString(), hostId: input.hostId ?? 'local', threadId: input.threadId ?? null, baselineTurnIds: [], prompt: input.prompt, execution, callbackMode:input.callbackMode==='peer'?'peer':'external', taskVersion:input.taskVersion??null };
     task.peerOrigin=creationOrigin(input.prompt,idempotencyKey)??state.tasks[internal.resumesTaskId]?.peerOrigin??null;
     state.tasks[task.id] = task;
     if (idempotencyKey) state.idempotency[idempotencyKey] = { taskId: task.id, fingerprint, fingerprintVersion: 2 };
@@ -209,6 +213,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
           const snapshot = await tools.call('read_thread', { threadId: task.threadId, hostId: task.hostId, turnLimit: 10 });
           task.baselineTurnIds = (snapshot.turns ?? []).map(turn => turn.id);
           task.previousStatus = snapshot.thread?.status;
+          if(task.pausedTaskId&&(snapshot.thread?.status?.type==='active'||snapshot.turns?.[0]?.status==='inProgress'))throw Object.assign(new Error('Session is active; the notification must wait'),{dispatchNotStarted:true});
           if (task.operation === 'wake' && task.previousStatus?.type === 'active') throw new Error('Session is already active; use messages to queue work after its current task');
         }
         task.status = 'dispatching'; save();
@@ -310,9 +315,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         const data = await body(req);
         return json(res, 202, signals.receive(data, token, root));
       }
-      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.3', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true, version: '0.8.4', backend: state.provider, transport: tools.transport ?? 'codex-desktop-native-pipe', callerThread: tools.callerThread });
       if (req.method === 'GET' && url.pathname === '/v1/compatibility') return json(res,200,await coordinator.doctor(state.provider==='claude'?'claude':'codex'));
-      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.3', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
+      if (req.method === 'GET' && url.pathname === '/v1/capabilities') return json(res, 200, { version: '0.8.4', executionFields: ['projectId', ...tools.provider === 'deepseek' ? ['workspaceId'] : [], 'environment', 'target', 'model', 'effort',...tools.prepareExecution?['cwd']:[],'taskVersion',...tools.executionCapabilities?['writableRoots','sandboxMode','approvalPolicy']:[]], effortValues: tools.effortValues ?? EFFORTS,effortAliases:{median:'medium'},models:tools.listModels?'/v1/models':null,cwdPolicy:tools.prepareExecution?'registered-project-or-verified-git-worktree':'native-project-only',...tools.executionCapabilities?tools.executionCapabilities():{},callbackSecrets:'credentialsFile-only', wake: ['idle', 'notLoaded'], outbound: ['message', 'progress', 'finding', 'blocker', 'decision'], autoInjectCallback: true });
       if (tools.provider === 'deepseek' && url.pathname === '/v1/workspaces') {
         if (req.method === 'GET') return json(res, 200, await tools.call('list_workspaces', {}));
         if (req.method === 'POST') { const input = await body(req); nonempty(input.path, 'path'); const result = await tools.call('create_workspace', input); return json(res, result.created ? 201 : 200, result); }

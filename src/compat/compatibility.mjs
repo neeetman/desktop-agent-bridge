@@ -26,14 +26,18 @@ export function validateProfile(profile){
   for(const manifest of Object.values(profile.manifests))for(const [key,value] of Object.entries(profile.hashes))if(manifest[key]!==value)throw compatError('INVALID_PROFILE','Manifest/profile desktop hashes disagree');
   return profile;
 }
-export async function desktopInventory(){
+export function coalesceInventory(load){
+  let pending;
+  return ()=>pending??=(Promise.resolve().then(load).finally(()=>{pending=null;}));
+}
+export const desktopInventory=coalesceInventory(async()=>{
   if(process.platform!=='win32')return {processes:[],installed:[]};
   let python='python';try{python=readJson(path.join(ROOT,'runtime/supervisor/config.json')).python??python;}catch{}
   const {stdout}=await run(python,[sourcePath(ROOT,'desktop_inventory.py')],{windowsHide:true,timeout:5000,maxBuffer:2*1024*1024});
   const data=JSON.parse(stdout.replace(/^\uFEFF/,''));
   if(!Array.isArray(data.processes)||!Array.isArray(data.installed))throw compatError('PROCESS_SNAPSHOT_UNAVAILABLE','Invalid native desktop inventory');
   return data;
-}
+});
 export class Compatibility {
   constructor(root=ROOT,{inventory=desktopInventory,now=Date.now,alive}={}){this.root=path.resolve(root);this.directory=path.join(this.root,'runtime/updates');this.file=path.join(this.directory,'state.json');this.inventory=inventory;this.now=now;this.alive=alive??(pid=>{try{process.kill(pid,0);return true;}catch{return false;}});}
   state(){const value=readJson(this.file,{schemaVersion:1,apps:{},leases:{},journal:[]});if(value.schemaVersion!==1||!value.apps||!value.leases||!Array.isArray(value.journal))throw compatError('STATE_SCHEMA_UNSUPPORTED','Compatibility state schema is unsupported; no state was changed');return value;}

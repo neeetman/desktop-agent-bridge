@@ -32,7 +32,7 @@ test('a peer answer resumes the exact paused callback task ahead of old notifica
  try{
   const task=await request('/v1/tasks','POST',{prompt:'work'});
   const callback=await request('/v1/inbox','POST',{taskId:task.id,messageId:'callback',kind:'decision',question:'original question',options:['original A','original B']});
-  const old=await router.send({from:supervisor,to:worker,text:'older queued notification',expectReply:false});
+  const old=await router.send({from:supervisor,to:worker,text:'older queued work request',expectReply:true});
   await tick();assert.equal(router.state.jobs[old.id].status,'queued');assert.equal(sends,0);
   const peer=await router.requestDecision({from:worker,to:supervisor,question:`Escalating callback ${callback.decisionId}`,options:['A','B']});
   await router.answerDecision({from:supervisor,decisionId:peer.id,answer:'B',context:'chosen direction'});
