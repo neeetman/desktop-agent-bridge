@@ -75,7 +75,7 @@ export class Signals {
     }
     const kind = data.kind ?? 'message';
     if (!['message', 'progress', 'finding', 'blocker', 'decision'].includes(kind)) throw apiError(400, 'Unsupported signal kind');
-    const attribution = { threadId: threadId ?? null, taskId: task?.id ?? null, messageId: data.messageId, credential: root ? 'controller' : 'session' };
+    const attribution = { threadId: threadId ?? null, taskId: task?.id ?? null, messageId: data.messageId, credential: root ? 'controller' : 'session',peerOrigin:task?.peerOrigin??null,taskVersion:task?.taskVersion??null };
     let result;
     if (kind === 'decision') {
       nonempty(data.question, 'question');
@@ -90,7 +90,7 @@ export class Signals {
     } else {
       nonempty(data.text, 'text');
       const event = this.emit('session.outbound', { ...attribution, kind, text: data.text, replyTo: data.replyTo ?? null });
-      result = { accepted: true, eventId: event.id };
+      result = { accepted: true, eventId: event.id,delivery:'recorded_locally' };
     }
     this.state.idempotency[key] = { ...result, fingerprint };
     this.save();

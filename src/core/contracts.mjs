@@ -1,5 +1,14 @@
 export const EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 export const apiError = (status, message) => Object.assign(new Error(message), { status });
+export function creationOrigin(prompt,key){
+  const match=typeof prompt==='string'&&prompt.match(/^\[bridge (\{[^\n]+\})\](?:\r?\n|$)/);
+  if(!match)return null;
+  try{
+    const header=JSON.parse(match[1]),source=/^(codex|claude|deepseek):([^\s:]+)$/.exec(header.from??'');
+    if(header.kind!=='task_creation'||!source||typeof header.requestId!=='string'||key!==`mcp-create:${header.from}:${header.requestId}`)return null;
+    return {app:source[1],threadId:source[2]};
+  }catch{return null;}
+}
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item)).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).filter(key => value[key] !== undefined).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;

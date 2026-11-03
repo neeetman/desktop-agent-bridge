@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DesktopTools, PipeRpc } from '../adapters/codex/native.mjs';
-import { normalizeExecution, nativeModelArgs, queryThreads, EFFORTS, canonicalJson } from './contracts.mjs';
+import { normalizeExecution, nativeModelArgs, queryThreads, EFFORTS, canonicalJson,creationOrigin } from './contracts.mjs';
 import { Signals } from './signals.mjs';
 import {publicResult,errorData} from './collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
@@ -39,6 +39,12 @@ async function body(req) {
 }
 
 export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000, enableIpc = true, preflight }) {
+  // Claim the endpoint before touching credentials or durable task state. A
+  // duplicate startup must not overwrite a healthy owner's connection file.
+  const initializing=(req,res)=>json(res,503,{error:'Bridge is initializing',code:'SERVICE_INITIALIZING',dispatchNotStarted:true});
+  const server=http.createServer(initializing);
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
+  try {
   fs.mkdirSync(stateDir, { recursive: true });
   const stateFile = path.join(stateDir, 'state.json');
   const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : {
@@ -53,6 +59,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     try { await preflight(); } catch (error) { tools.close(); throw error; }
   }
   state.provider = tools.provider ?? 'codex';
+  for(const [key,record] of Object.entries(state.idempotency)){
+    const task=state.tasks[record.taskId];if(task&&!task.peerOrigin)task.peerOrigin=creationOrigin(task.prompt,key);
+  }
   // A crash during native dispatch must never lead to an automatic duplicate send.
   for (const task of Object.values(state.tasks)) if (['prepared', 'dispatching'].includes(task.status)) task.status = 'unknown';
   save();
@@ -190,6 +199,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     if(idempotencyKey&&state.idempotency[idempotencyKey])return dispatch(input,idempotencyKey,internal);
     if (input.threadId && Object.values(state.tasks).some(task => task.threadId === input.threadId && task.hostId === (input.hostId ?? 'local') && active.has(task.status) && task.id !== internal.resumesTaskId)) throw fail(409, 'A bridge task is already pending for this session');
     const task = { id: crypto.randomUUID(), status: 'prepared', operation: internal.operation ?? 'task', resumesTaskId: internal.resumesTaskId, createdAt: new Date().toISOString(), hostId: input.hostId ?? 'local', threadId: input.threadId ?? null, baselineTurnIds: [], prompt: input.prompt, execution, callbackMode:input.callbackMode==='peer'?'peer':'external', taskVersion:input.taskVersion??null };
+    task.peerOrigin=creationOrigin(input.prompt,idempotencyKey)??state.tasks[internal.resumesTaskId]?.peerOrigin??null;
     state.tasks[task.id] = task;
     if (idempotencyKey) state.idempotency[idempotencyKey] = { taskId: task.id, fingerprint, fingerprintVersion: 2 };
     save();
@@ -288,7 +298,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     return { decision, continuation };
   }
 
-  const server = http.createServer(async (req, res) => {
+  const handleRequest = async (req, res) => {
     try {
       // No browser-origin access or CORS: this is an authenticated local agent API.
       if (req.headers.origin) throw fail(403, 'Browser-origin requests are not accepted');
@@ -374,12 +384,12 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
       }
       throw fail(404, 'Unknown endpoint');
     } catch (error) { if (!res.headersSent) {const details=errorData(error,502);json(res,details.httpStatus,{...details,error:details.message});} else res.end(); }
-  });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
+  };
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   writeJson(path.join(stateDir, 'connection.json'), { baseUrl, token: state.token, pid: process.pid, callerThread: tools.callerThread, backend: state.provider });
   for (const item of Object.values(state.watches)) callback(item.threadId);
   for (const task of Object.values(state.tasks)) signals.taskCallback(task);
+  server.removeListener('request',initializing);server.on('request',handleRequest);
   const timer = setInterval(() => { for (const item of Object.values(state.watches)) void refresh(item); }, pollMs);
   timer.unref();
   let ipc;
@@ -399,6 +409,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     baseUrl, token: state.token, state,
     async close() { clearInterval(timer); ipc?.close(); for (const stream of streams) stream.end(); tools.close(); await new Promise(resolve => server.close(resolve)); },
   };
+  }catch(error){await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});throw error;}
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {

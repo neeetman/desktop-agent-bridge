@@ -29,6 +29,17 @@ test('cold startup creates credentials before guarded native preflight and publi
  const failed=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-bootstrap-'));closed=false;
  try{await assert.rejects(startBridge({tools,stateDir:failed,port:0,enableIpc:false,preflight:async()=>{throw Error('native unavailable');}}),/native unavailable/);assert.equal(closed,true);assert.equal(JSON.parse(fs.readFileSync(path.join(failed,'connection.json'))).pid,undefined);}finally{removeTestDirectory(failed);}
 });
+test('duplicate startup cannot touch the live owner credentials, tasks or native preflight',async()=>{
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-owner-')),tools={close(){}};
+ const first=await startBridge({tools,stateDir,port:0,enableIpc:false});
+ try{
+  const credentials=fs.readFileSync(path.join(stateDir,'connection.json')),state=fs.readFileSync(path.join(stateDir,'state.json'));let probes=0;
+  await assert.rejects(startBridge({tools,stateDir,port:Number(new URL(first.baseUrl).port),enableIpc:false,preflight:async()=>{probes++;}}),{code:'EADDRINUSE'});
+  assert.equal(probes,0);assert.deepEqual(fs.readFileSync(path.join(stateDir,'connection.json')),credentials);assert.deepEqual(fs.readFileSync(path.join(stateDir,'state.json')),state);
+  assert.equal((await fetch(first.baseUrl+'/health',{headers:{Authorization:`Bearer ${first.token}`}})).status,200);
+ }finally{await first.close();removeTestDirectory(stateDir);}
+});
+
 test('reconnect discovers a new desktop pipe; a disconnected mutation is never replayed', async () => {
   const makePath=()=>process.platform==='win32'?`\\\\.\\pipe\\codex-bridge-test-${crypto.randomUUID()}`:path.join(os.tmpdir(),`codex-bridge-${crypto.randomUUID()}.sock`);
   const firstPath=makePath(),secondPath=makePath(),sockets=new Set();let calls=0;

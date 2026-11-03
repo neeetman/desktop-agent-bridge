@@ -59,3 +59,20 @@ DeepSeek 的 workspaceId、workspaceName、workspacePath、originCwd 和 cwd 分
 ## 外部客户端
 
 `client.mjs` 还支持 HTTP 桥接工具和任务专用 callback 凭证。使用 `--args-file <JSON路径>` 避免 shell 转义；不要把 token 写进任务正文或日志。每轮凭证仅适用于其自身任务。服务端 HTTP API 的主要路由见 [架构说明](architecture.md)。
+
+## Callback reports from MCP-created tasks
+
+The backend binds a task's originating peer to the router-generated creation header
+and its exact durable `mcp-create` idempotency key. Callback payloads cannot choose
+or override that peer. Reports are forwarded through the ordinary durable peer
+queue; findings and blockers request a reply, while progress notices do not.
+Callback decisions include the exact callback decision ID in their peer context,
+so the answer resumes the original waiting task.
+
+`accepted:true, delivery:"recorded_locally"` acknowledges callback storage only.
+Peer queueing, native delivery and recipient acknowledgement remain distinct.
+Forwarding cursors survive restarts, and stable callback IDs deduplicate a report
+if the router exits after queueing it. A first deployment skips old history;
+operators may select exact pending event IDs for recovery rather than replaying
+the backlog. Existing task origins can be recovered only when the original
+creation header and idempotency record agree.

@@ -9,6 +9,7 @@ import { canonicalJson } from '../core/contracts.mjs';
 import {publicResult,bridgeHeader,errorData} from '../core/collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
 import {HealthMonitor} from './health-monitor.mjs';
+import {CallbackForwarder} from './callback-forwarder.mjs';
 
 const ROOT = fileURLToPath(projectURL(''));
 const bad = (status, message) => Object.assign(new Error(message), { status });
@@ -25,6 +26,7 @@ export class PeerRouter {
     this.backendRequest = backendRequest ?? this.nativeRequest.bind(this);
     this.busy = new Set(); this.ticking = false; this.replyLocks=new Map();this.state.health??={};this.state.healthSubscribers??={};
     this.healthLogAt=new Map();
+    this.callbackForwarder=new CallbackForwarder(this);
     this.healthMonitor=new HealthMonitor({...healthOptions,initial:this.state.health,request:(...args)=>this.backendRequest(...args),onResult:(row,transition)=>this.recordHealth(row,transition)});
     this.timer = setInterval(() => void this.tick(), pollMs); this.timer.unref(); this.save();
   }
@@ -32,6 +34,7 @@ export class PeerRouter {
   async nativeRequest(app, route, method = 'GET', body, key, options = {}) {
     const file = sourcePath(ROOT, { codex: 'runtime/connection.json', claude: 'runtime/claude/connection.json', deepseek: 'runtime/deepseek/connection.json' }[app] ?? 'invalid-app');
     const connection = JSON.parse(fs.readFileSync(file));
+    if(connection.initializing||typeof connection.baseUrl!=='string')throw Object.assign(bad(503,'Native bridge service is initializing; request has not been dispatched'),{code:'SERVICE_INITIALIZING',dispatchNotStarted:true,dispatchStage:'notStarted'});
     const response = await fetch(connection.baseUrl + route, { method, headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json', ...(key ? { 'Idempotency-Key': key } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: options.signal ?? AbortSignal.timeout(options.timeoutMs ?? 65000) });
     const result = await response.json(); if (!response.ok) throw Object.assign(bad(response.status,typeof result.error==='string'?result.error:JSON.stringify(result)),{code:result.code,dispatchNotStarted:result.dispatchNotStarted,dispatchStage:result.dispatchStage}); return result;
   }
@@ -290,12 +293,16 @@ export class PeerRouter {
     }
     this.save();
   }
-  close() { clearInterval(this.timer);clearInterval(this.healthTimer);clearInterval(this.maintenanceTimer);this.healthMonitor.close(); }
+  close() { clearInterval(this.timer);clearInterval(this.healthTimer);clearInterval(this.callbackTimer);clearInterval(this.maintenanceTimer);this.healthMonitor.close(); }
 }
 
 export async function startRouter({ directory, port = 43130, backendRequest, healthOptions } = {}) {
+  const initializing=(req,res)=>{res.writeHead(503,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Router is initializing',code:'SERVICE_INITIALIZING'}));};
+  const server=http.createServer(initializing);
+  await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
+  try {
   const router = new PeerRouter({ directory, backendRequest, healthOptions });
-  const server = http.createServer(async (request, response) => {
+  const handleRequest = async (request, response) => {
     const reply = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(publicResult(body))); };
     try {
       if (request.headers.origin || request.headers.authorization !== `Bearer ${router.state.token}`) throw bad(401, 'Local router authorization required');
@@ -337,11 +344,13 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         default: throw bad(404, 'Unknown route');
       }
     } catch (error) { const details=errorData(error,500);reply(details.httpStatus,{error:details.message,code:details.code,httpStatus:details.httpStatus}); }
-  });
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
+  };
   atomic(path.join(router.directory, 'connection.json'), { baseUrl: `http://127.0.0.1:${server.address().port}`, token: router.state.token, pid: process.pid });
+  server.removeListener('request',initializing);server.on('request',handleRequest);
   router.healthTimer=setInterval(()=>{if(!Object.keys(router.state.healthSubscribers).length)return;for(const app of ['codex','claude','deepseek'])void router.healthMonitor.probe(app).catch(()=>{});},30000);router.healthTimer.unref();
+  router.callbackTimer=setInterval(()=>{for(const app of ['codex','claude','deepseek'])void router.callbackForwarder.poll(app).catch(error=>{router.state.callbackErrors??={};router.state.callbackErrors[app]={code:error.code??'CALLBACK_FORWARD_FAILED',message:error.message,at:new Date().toISOString()};router.save();});},3000);router.callbackTimer.unref();
   return { router, server, close: () => new Promise(resolve => { router.close(); server.close(resolve); server.closeAllConnections(); }) };
+  }catch(error){await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});throw error;}
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const running = await startRouter(); console.log('Desktop peer router ready on 127.0.0.1:43130');
