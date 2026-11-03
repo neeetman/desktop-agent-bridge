@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.4 — 2026-11-03
+
+- Deliver peer notifications to idle chats paused on callback decisions without resolving the decision or completing its parent task.
+- Coalesce concurrent desktop inventory queries and filter WMI on the server to reduce read-path pressure; completed and failed inventories are not cached.
+
 ## 0.8.3 — 2026-11-03
 
 - Resume an explicitly linked callback decision through its durable continuation when a peer answer arrives, instead of blocking behind the paused task.

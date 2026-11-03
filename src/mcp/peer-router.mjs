@@ -181,7 +181,7 @@ export class PeerRouter {
             if(!task)throw bad(502,'Decision continuation is missing');
           }
         }
-        task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined }, `peer-router:${message.id}`);
+        task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined,...message.kind==='message'&&!message.expectReply?{peerNotification:true}:{} }, `peer-router:${message.id}`);
       } catch (error) {
         if (error.status === 409) { job.status = 'queued';job.lastError=error.message;job.lastErrorCode=error.code; this.save(); return; }
         if(error.status===503&&error.dispatchNotStarted){job.status='queued';job.blockedByUpdate=error.code;this.save();return;}
