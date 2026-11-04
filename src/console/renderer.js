@@ -166,6 +166,7 @@ function version(row) {
 }
 function workerSummary(app) {
   const workers = (state.workers || []).filter(worker => worker.app === app);
+  if (state.unverifiedWorkerApps?.includes(app)) return '<p class="meta">暂时无法核验 MCP 进程，请刷新后再查看。</p>';
   if (!workers.length) return '<p class="meta">尚无运行中的 MCP worker 记录</p>';
   const rows = workers.map(worker => {
     const status = !worker.revision ? '版本未知' : worker.revision === state.installedRevision ? '当前版本' : '建议重载';

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 
 
 def cim_time(ticks):
@@ -28,7 +29,7 @@ def desktop_rows(rows):
                         for parent in rows)]
 
 
-def process_rows():
+def process_rows(names=('chatgpt.exe', 'claude.exe'), pids=None):
     if os.name != 'nt':
         raise RuntimeError('Win32 process inventory requires Windows')
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -60,7 +61,7 @@ def process_rows():
         entry = Entry(); entry.dwSize = ctypes.sizeof(entry)
         found = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
         while found:
-            if entry.szExeFile.lower() in ['chatgpt.exe', 'claude.exe']:
+            if entry.szExeFile.lower() in names and (pids is None or entry.th32ProcessID in pids):
                 pid = entry.th32ProcessID; candidate_session = w.DWORD()
                 if not kernel.ProcessIdToSessionId(pid, ctypes.byref(candidate_session)):
                     if ctypes.get_last_error() != 87:
@@ -120,4 +121,7 @@ def installed_packages():
 
 
 if __name__ == '__main__':
-    print(json.dumps({'processes': desktop_rows(process_rows()), 'installed': installed_packages()}))
+    if sys.argv[1:2] == ['--workers']:
+        print(json.dumps(process_rows(('node.exe',), set(map(int, sys.argv[2:])))))
+    else:
+        print(json.dumps({'processes': desktop_rows(process_rows()), 'installed': installed_packages()}))

@@ -30,11 +30,23 @@ export function coalesceInventory(load){
   let pending;
   return ()=>pending??=(Promise.resolve().then(load).finally(()=>{pending=null;}));
 }
+async function readWin32Inventory(args) {
+  let python='python';try{python=readJson(path.join(ROOT,'runtime/supervisor/config.json')).python??python;}catch{}
+  const {stdout}=await run(python,[sourcePath(ROOT,'desktop_inventory.py'),...args],{windowsHide:true,timeout:5000,maxBuffer:2*1024*1024});
+  return JSON.parse(stdout.replace(/^\uFEFF/,''));
+}
+
+export function verifyWorker(record, processInfo) {
+  // A record is written by the worker while it is running. A process born
+  // after that observation cannot be that worker, even with the same PID.
+  return processInfo?.Name?.toLowerCase() === 'node.exe' &&
+    processInfo.ProcessId === record.pid &&
+    Date.parse(processInfo.Created) <= Date.parse(record.at);
+}
+
 export const desktopInventory=coalesceInventory(async()=>{
   if(process.platform!=='win32')return {processes:[],installed:[]};
-  let python='python';try{python=readJson(path.join(ROOT,'runtime/supervisor/config.json')).python??python;}catch{}
-  const {stdout}=await run(python,[sourcePath(ROOT,'desktop_inventory.py')],{windowsHide:true,timeout:5000,maxBuffer:2*1024*1024});
-  const data=JSON.parse(stdout.replace(/^\uFEFF/,''));
+  const data=await readWin32Inventory([]);
   if(!Array.isArray(data.processes)||!Array.isArray(data.installed))throw compatError('PROCESS_SNAPSHOT_UNAVAILABLE','Invalid native desktop inventory');
   return data;
 });
@@ -125,7 +137,24 @@ export class Compatibility {
   async doctor(app){
     const inventory=await this.inventory(),state=this.state();const apps={};
     for(const name of app?[app]:['codex','claude']){try{const row=this.evaluate(name,inventory,state);apps[name]={runningBuild:row.runningBuild,installedBuild:row.installedBuild,profileId:row.profile.id,profileDigest:row.profileDigest,adapterDigest:row.profile.adapterDigest,capabilities:row.profile.capabilities,phase:state.apps[name]?.phase??'notAttached',probe:state.apps[name]?.probe??null,circuits:state.apps[name]?.circuits??{},transition:state.apps[name]?.transition??null};}catch(error){apps[name]={phase:'blocked',installedBuild:inventory.installed.find(row=>row.app===name)??null,runningBuild:error.runningBuild??null,code:error.code??'DIAGNOSTIC_ERROR',error:error.message};}}
-    const workerDirectory=path.join(this.root,'runtime/router/mcp-workers');const workers=fs.existsSync(workerDirectory)?fs.readdirSync(workerDirectory).filter(name=>/^\d+\.json$/.test(name)).map(name=>{const row=readJson(path.join(workerDirectory,name));return {...row,alive:this.alive(row.pid)};}):[];
+    const workerDirectory = path.join(this.root,'runtime/router/mcp-workers');
+    const workers = [];
+    if (fs.existsSync(workerDirectory)) {
+      for (const name of fs.readdirSync(workerDirectory).filter(name => /^\d+\.json$/.test(name))) {
+        const record = readJson(path.join(workerDirectory,name));
+        workers.push({...record,alive:false});
+      }
+    }
+    const candidates = workers.filter(record => Number.isSafeInteger(record.pid) && record.pid > 0 && this.alive(record.pid));
+    if (candidates.length) {
+      try {
+        const rows = await readWin32Inventory(['--workers', ...candidates.map(row => String(row.pid))]);
+        const byPid = new Map(rows.map(row => [row.ProcessId,row]));
+        for (const record of candidates) record.alive = verifyWorker(record, byPid.get(record.pid));
+      } catch {
+        for (const record of candidates) record.alive = null;
+      }
+    }
     return {passive:true,attached:false,apps,workers};
   }
   async plan(app,profileId){const inventory=await this.inventory();const state=this.state(),selected=this.evaluate(app,inventory,state,profileId);return {app,from:state.apps[app]?.profileId??null,to:selected.profile.id,generation:selected.generation,requiresIdle:true,requiresHelperProbe:true,rollbackPossible:!!state.apps[app]?.previousProfileId,protected:readJson(path.join(this.root,'runtime/router/protected-threads.json'),{threadIds:[]}).threadIds.length>0};}

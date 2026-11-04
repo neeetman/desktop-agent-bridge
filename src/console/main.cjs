@@ -212,7 +212,8 @@ if (!app.requestSingleInstanceLock()) {
       ]);
       return {
         apps: result.apps,
-        workers: result.workers.filter(worker => worker.alive).map(worker => ({
+        unverifiedWorkerApps: result.workers.filter(worker => worker.alive === null).map(worker => worker.app),
+        workers: result.workers.filter(worker => worker.alive === true).map(worker => ({
           app:worker.app, pid:worker.pid, threadId:worker.threadId, revision:worker.clientRevision
         })),
         installedRevision: createHash('sha256').update(Buffer.concat(await Promise.all(
