@@ -160,6 +160,10 @@ export class DesktopTools {
     catch(error){throw Object.assign(error,{status:503,code:error.code??'EXECUTION_PREFLIGHT_FAILED',dispatchNotStarted:true});}
   }
   async readSettings(threadId, hostId = 'local') {
+    if(this.isExecutionManaged(threadId))return this.guardRuntime('codex','read',async selection=>{
+      if(selection.profile?.coreApiVersion===2)return this.readSettingsGuarded(threadId,hostId);
+      return this.guardRuntime('codex','settings',()=>this.readSettingsGuarded(threadId,hostId));
+    });
     return this.guardRuntime('codex','settings',()=>this.readSettingsGuarded(threadId,hostId));
   }
   async readSettingsGuarded(threadId, hostId = 'local') {
@@ -197,7 +201,7 @@ export class DesktopTools {
     if(!['list_projects','list_threads','list_archived_threads','read_thread','create_thread','send_message_to_thread'].includes(tool))throw compatError('CAPABILITY_UNSUPPORTED','Unknown native tool is not allowed by the bridge contract');
     const capability=['create_thread','send_message_to_thread'].includes(tool)?'send':'read';
     return this.guardRuntime('codex',capability,async selection=>{
-    if(tool==='create_thread' && selection.profile?.evidence?.stage==='messaging-verified')throw compatError('CAPABILITY_UNSUPPORTED','This profile is validated for existing-chat messaging only');
+    if(tool==='create_thread' && (selection.profile?.coreApiVersion===2||selection.profile?.evidence?.stage==='messaging-verified'))throw compatError('CAPABILITY_UNSUPPORTED','Generated profiles require validated managed creation');
     if(this.nativeGeneration&&this.nativeGeneration!==selection.binding?.generation){this.rpc.close();this.settingsRpc?.close();this.nativeSchema=null;}
     this.nativeGeneration=selection.binding?.generation;
     if(capability==='send'&&this.nativeSchema!==selection.binding?.activationEpoch){const declaration=await this.rpc.request('tools/list',{threadStartKind:'all'});if(!Array.isArray(declaration.tools)||!declaration.tools.some(item=>item.name===tool&&item.inputSchema?.type==='object'))throw compatError('CONTRACT_MISMATCH','Native write-tool schema is unavailable');this.nativeSchema=selection.binding?.activationEpoch;}

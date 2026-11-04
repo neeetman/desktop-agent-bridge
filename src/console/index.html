@@ -150,7 +150,7 @@
           <div id="packages"></div>
           <div class="result" id="result" role="status" hidden></div>
             <details class="canary-panel"><summary>未知版本 · 生成与验收</summary>
-              <p>填入两条专用测试会话的 ID。验收将发送三轮测试消息，核对消费回执后生成本机适配包。</p>
+              <p>使用两条专用会话核对收发与回执，随后在独立目录测试创建、权限和 MCP 重载。每个包只启用通过的能力。</p>
               <form id="certify-form">
                 <label>生成适配包<select id="certify-app"><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
                 <label>Codex 测试会话<input id="certify-codex" required autocomplete="off" placeholder="会话 UUID"></label>
@@ -163,6 +163,7 @@
             </details>
           <section class="preferences" aria-labelledby="preferences-heading">
             <h2 id="preferences-heading">启动偏好</h2>
+            <div class="preference-row"><span class="preference-copy"><strong>关闭窗口后在后台运行</strong><small>左键点击系统托盘图标重新打开，右键选择“退出控制台”完全退出</small></span></div>
             <label class="preference-row" for="login-startup">
               <span class="setting-icon"><i data-icon="monitor"></i></span>
               <span class="preference-copy"><strong>登录时打开控制台</strong>

@@ -4,6 +4,8 @@ Run `desktop-agent-bridge console` (from a checkout, `node bin/desktop-agent-bri
 
 For a previously unseen build, the console can discover a structural candidate and validate messaging on two dedicated chats. [Automatic validation and CLI commands](docs/unknown-builds.md).
 
+Closing the console sends it to the Windows notification area. Left-click its icon to reopen it, or right-click for queue counts and **Quit console**. The console and its preview follow the system light or dark theme.
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 An open-source, local session bridge for **Codex Desktop, Claude Code in Claude Desktop, and DeepSeek Harness on Windows**. Desktop agents can send messages, receive replies, request decisions, and wake the original session through MCP.

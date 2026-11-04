@@ -5,6 +5,8 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {coordinator,withCapability,sameBinding,compatError} from '../../compat/compatibility.mjs';
+import policy from '../../core/execution-policy.cjs';
+import {checkExecutionOperation} from '../../compat/capability-checks.mjs';
 const run=promisify(execFile);let attaching;
 export async function ensureExecution(){
  const selection=await coordinator.resolve('codex','execution');
@@ -14,7 +16,13 @@ export async function ensureExecution(){
 }
 export async function executionRpc(method,params={}){
  if(method==='status')return executionWire(method,params);
- return withCapability('codex','execution',selection=>executionWire(method,{...params,binding:selection.binding,expiresAt:Date.now()+90000}));
+ return withCapability('codex','execution',selection=>{
+   if(selection.profile.coreApiVersion===2){
+     const input=method==='prepare'?policy.loadState().threads[params.threadId]:params.args??params.policy;
+     checkExecutionOperation(selection.profile.capabilities,method,input);
+   }
+   return executionWire(method,{...params,binding:selection.binding,expiresAt:Date.now()+90000});
+ });
 }
 export async function executionWire(method,params={}){
  const {token}=JSON.parse(fs.readFileSync(projectURL("runtime/connection.json"),'utf8'));

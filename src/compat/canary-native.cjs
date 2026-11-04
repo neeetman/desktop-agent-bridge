@@ -1,8 +1,9 @@
-// Runs in the existing Electron main thread. The transient channel can only read
-// the selected Claude chat and send a bounded validation challenge to that chat.
-function attach(config) {
+// Runs in the existing Electron main thread. Advanced mutations are confined
+// to the disposable fixture, or to the separately idle-checked MCP operation.
+function attach(config, operations) {
   if (process.type !== "browser") return JSON.stringify({ installed: false });
   const req = process.mainModule.require.bind(process.mainModule);
+  const advanced = operations(config,req);
   if (!req("node:worker_threads").isMainThread)
     return JSON.stringify({ installed: false });
   const { app, webContents } = req("electron");
@@ -18,7 +19,7 @@ function attach(config) {
   let buffer = "";
   async function call({ method, text }) {
     if (config.app === "codex") {
-      if (method !== "probe") throw Error("Unsupported validation method");
+      if (method !== "probe") return advanced.codex(method);
       const manifest = config.manifest;
       const ctor = await req(
         path.join(config.adapterRoot, "codex-runtime.cjs"),
@@ -41,7 +42,8 @@ function attach(config) {
         const callback = await post("Runtime.callFunctionOn", {
           objectId: objects.objects.objectId,
           functionDeclaration:
-            'function(){return this.find(x=>x.options?.hostId==="local"&&!x.disposed&&x.connectionState==="connected")?.options.getStatsigEvaluations}',
+            'function(key){const matches=this.filter(x=>x.options?.hostId==="local"&&!x.disposed&&x.connectionState==="connected");if(matches.length!==1)return;globalThis[key]=matches[0];return matches[0].options.getStatsigEvaluations}',
+          arguments:[{value:key}],
         });
         const props = await post("Runtime.getProperties", {
           objectId: callback.result.objectId,
@@ -75,10 +77,14 @@ function attach(config) {
           const match = await post("Runtime.callFunctionOn", {
             objectId: instances.objects.objectId,
             functionDeclaration:
-              'function(){return this.filter(x=>x.hostId==="local"&&!x.disposed&&["startConversation","getConversation","readThread","updateThreadSettingsForNextTurn"].every(k=>typeof x[k]==="function")).length}',
+              'function(key){const rows=this.filter(x=>x.hostId==="local"&&!x.disposed&&["getConversation","readThread"].every(k=>typeof x[k]==="function"));if(rows.length===1)globalThis[key]={connection:globalThis[key],manager:rows[0]};return rows.length}',
+            arguments:[{value:key}],
             returnByValue: true,
           });
-          if (match.result.value === 1) return { connected: true };
+          if (match.result.value === 1) {
+            advanced.bound(globalThis[key].connection,globalThis[key].manager);
+            return { connected:true };
+          }
         }
         throw Error("Unique live conversation manager unavailable");
       } finally {
@@ -122,7 +128,7 @@ function attach(config) {
       if (!list.sessions.some((x) => x.sessionId === id))
         throw Error("Test chat missing from native session list");
       const ok = await page[0].executeJavaScript(
-        '["start","sendMessage","getTranscriptTail","getTranscriptPage"].every(k=>typeof window["claude.web"].LocalSessions[k]==="function")',
+        '["sendMessage","getTranscriptTail","getTranscriptPage"].every(k=>typeof window["claude.web"].LocalSessions[k]==="function")',
       );
       if (!ok) throw Error("Claude session method missing");
       return { connected: true, version: app.getVersion() };
@@ -189,7 +195,7 @@ function attach(config) {
           }),
       };
     }
-    throw Error("Unsupported validation method");
+    return advanced.claude(method,renderer,manager,s);
   }
   sock.on("data", (chunk) => {
     buffer += chunk.toString("utf8");

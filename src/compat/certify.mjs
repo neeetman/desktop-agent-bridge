@@ -10,12 +10,13 @@ import {
   adapterDigest,
 } from "./compatibility.mjs";
 import { discover } from "./discover.mjs";
+import {certifiedCapabilities,probeCapabilities} from "./capability-checks.mjs";
 import { openChannel } from "./canary-channel.mjs";
 import { DesktopTools } from "../adapters/codex/native.mjs";
 import { claudeTurns } from "../adapters/claude/claude-native.mjs";
 
 const router = path.join(ROOT, "runtime/router");
-const duration = 8 * 60 * 1000;
+const duration = 15 * 60 * 1000;
 const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
 export function checkThreads(threads, protectedIds) {
   for (const [app, prefix] of [
@@ -281,21 +282,29 @@ export async function certify(app, threads) {
     for (const c of Object.values(candidates)) await assertBuild(c);
     const packages = {};
     for (const [name, c] of Object.entries(candidates)) {
+      report.stage='capabilities-'+name;
+      const checks=await probeCapabilities(name,method=>channels[name].call(method),async()=>{
+        protection();await assertBuild(c);
+        if(Date.now()>=expiresAt)throw Error('Validation window expired');
+      },checks=>{report[name].checks=checks;save();});
       const p = c.profile;
       if (adapterDigest(c.adapterRoot, p.adapterFiles) !== p.adapterDigest)
         throw Error("Candidate adapter changed during validation");
-      p.id = p.id.replace(/-candidate$/, "-msg-" + runId.slice(0, 8));
-      p.capabilities = ["read", "send"];
+      p.id = p.id.replace(/-candidate$/, "-caps-" + runId.slice(0, 8));
+      p.coreApiVersion=2;
+      p.capabilities = certifiedCapabilities(name,checks);
       p.evidence = {
         baseline:
           "Native probes and three addressed MCP receipts on dedicated desktop chats",
-        stage: "messaging-verified",
+        stage: "capability-verified",
+        checks,
         runId,
-        validated: ["read", "send"],
+        validated: p.capabilities,
         seed: p.evidence.seed,
       };
-      packages[name] = { folder: c.folder, profileId: p.id };
+      packages[name] = { folder: c.folder, profileId: p.id,capabilities:p.capabilities,checks };
     }
+    for (const c of Object.values(candidates))await assertBuild(c);
     for (const c of Object.values(candidates))
       atomicJson(path.join(c.folder, "profile.json"), c.profile);
     const c = candidates[app],

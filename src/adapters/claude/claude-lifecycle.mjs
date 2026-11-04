@@ -10,6 +10,10 @@ export async function lifecycle(method, options={}) {
   return withCapability('claude',capability,selection=>{
     if(selection.profile.evidence.stage==='messaging-verified' && capability==='send' && options.payload.nativeMethod!=='sendMessage')
       throw compatError('CAPABILITY_UNSUPPORTED','This profile is validated for existing-chat messaging only');
+    if(selection.profile.coreApiVersion===2 && capability==='send'){
+      const required={start:'create',sendMessage:'send',mcpReconnect:'mcp'}[options.payload.nativeMethod];
+      if(!required||!selection.profile.capabilities.includes(required)||(required==='mcp'&&options.payload.args?.[1]!=='desktop-bridge'))throw compatError('CAPABILITY_UNSUPPORTED','Native operation was not certified for this build');
+    }
     return lifecycleWire(method,{...options,payload:{...options.payload,binding:selection.binding,expiresAt:Date.now()+60000}});
   });
 }

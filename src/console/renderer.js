@@ -504,7 +504,7 @@ async function watchStatus(change=false){
     toggle.checked=prefs.enabled;
     for(const name of ["codex","claude"])if(!change&&!$("certify-"+name).value)$("certify-"+name).value=prefs.threads?.[name]||"";
     const last=prefs.attempts[prefs.latest];
-    $("canary-watch-status").textContent=last?[last.status,last.error,...Object.values(last.packages||{}).map(p=>p.folder)].filter(Boolean).join(" · "):"";
+    $("canary-watch-status").textContent=last?[last.status,last.error,...Object.entries(last.packages||{}).map(([app,p])=>app+" "+(p.capabilities||[]).join(", ")+" · "+p.folder)].filter(Boolean).join(" · "):"";
   }catch(e){if(change)toggle.checked=!toggle.checked;$("canary-watch-status").textContent=e.message;}
   finally{toggle.disabled=false;}
 }

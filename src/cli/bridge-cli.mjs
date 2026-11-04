@@ -28,7 +28,7 @@ export async function main(args){
    result=await coordinator.doctor(app);
    if(args.includes('--probe')){
     if(!app)throw compatError('INVALID_ARGUMENT','--probe requires --app');
-    const kind=app==='claude'?'claude':result.apps.codex?.capabilities?.includes('execution')?'execution':'messaging';
+    const kind=app==='claude'?'claude':result.apps.codex?.capabilities?.some(c=>['create','execution'].includes(c))?'execution':'messaging';
     const selected=await coordinator.resolve(app,kind==='execution'?'execution':'read');
     result.probe=await helperStatus(selected,kind);result.passive=false;
    }

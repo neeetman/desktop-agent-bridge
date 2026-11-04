@@ -2,6 +2,7 @@ import {projectURL,sourcePath} from "../lib/paths.mjs";
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {generated,certifiedCapabilities} from './capability-checks.mjs';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
@@ -18,11 +19,14 @@ function safeFile(root,name){if(typeof name!=='string'||path.isAbsolute(name)||n
 export function validateProfile(profile){
   if(profile.evidence?.stage==='candidate')throw compatError('INVALID_PROFILE','Structural candidates require live validation before import');
   if(profile.evidence?.stage==='messaging-verified' && (!Array.isArray(profile.capabilities)||profile.capabilities.length!==2||!['read','send'].every(cap=>profile.capabilities.includes(cap))))throw compatError('INVALID_PROFILE','Messaging evidence only covers read and send');
-  if(profile.schemaVersion!==1||profile.coreApiVersion!==1||!['codex','claude'].includes(profile.app)||!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(profile.id??'')||profile.platform!=='win32'||profile.arch!=='x64')throw compatError('INVALID_PROFILE','Unsupported profile identity or schema');
+  const expanded=profile.evidence?.stage==='capability-verified';
+  if(expanded && (!/^[a-f0-9-]{36}$/i.test(profile.evidence.runId)||!['create','permissions','mcp'].every(k=>['passed','deferred','failed','skipped','unsupported'].includes(profile.evidence.checks?.[k]?.status))))throw compatError('INVALID_PROFILE','Incomplete capability report');
+  if(expanded && canonical(certifiedCapabilities(profile.app,profile.evidence.checks))!==canonical(profile.capabilities))throw compatError('INVALID_PROFILE','Profile capabilities disagree with native evidence');
+  if(profile.schemaVersion!==1||profile.coreApiVersion!==(expanded?2:1)||!['codex','claude'].includes(profile.app)||!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(profile.id??'')||profile.platform!=='win32'||profile.arch!=='x64')throw compatError('INVALID_PROFILE','Unsupported profile identity or schema');
   if(!Array.isArray(profile.adapterFiles)||!profile.adapterFiles.length||!Array.isArray(profile.capabilities)||!profile.capabilities.length||!profile.manifests||!profile.evidence?.baseline)throw compatError('INVALID_PROFILE','Profile lacks adapter, capabilities, manifests or evidence');
   if(!/^[a-f0-9]{64}$/.test(profile.adapterDigest??''))throw compatError('INVALID_PROFILE','Invalid adapter digest');
   for(const key of profile.app==='codex'?['executableSha256','chromeSha256','asarSha256']:['executableSha256','asarSha256'])if(!/^[a-f0-9]{64}$/.test(profile.hashes?.[key]??''))throw compatError('INVALID_PROFILE','Invalid desktop hash');
-  const allowed=profile.app==='codex'?['read','send','settings','execution','mcp']:['read','send','identity'];
+  const allowed=expanded?['read','send','create','permissions','mcp']:profile.app==='codex'?['read','send','settings','execution','mcp']:['read','send','identity'];
   if(profile.capabilities.some(item=>!allowed.includes(item))||new Set(profile.capabilities).size!==profile.capabilities.length)throw compatError('INVALID_PROFILE','Unknown or duplicate capability');
   for(const file of profile.adapterFiles)safeFile(ROOT,file);
   for(const manifest of Object.values(profile.manifests))for(const [key,value] of Object.entries(profile.hashes))if(manifest[key]!==value)throw compatError('INVALID_PROFILE','Manifest/profile desktop hashes disagree');
@@ -66,12 +70,13 @@ export class Compatibility {
   }
   profiles(){
     const catalog=readJson(path.join(this.root,'compat/catalog.json'));if(catalog.schemaVersion!==1||!Array.isArray(catalog.profiles))throw compatError('INVALID_PROFILE','Invalid compatibility catalog');
-    const local=[...readJson(path.join(this.directory,'imports.json'),[]),...readJson(path.join(this.directory,'history.json'),[])];
+    // A resident v1 client must still be able to load its catalog after a v2 import.
+    const local=['imports.json','history.json','imports-v2.json','history-v2.json'].flatMap(file=>readJson(path.join(this.directory,file),[]));
     const result=[...catalog.profiles.map(file=>({profile:readJson(safeFile(this.root,file)),adapterRoot:this.root})),...local.map(item=>({profile:readJson(path.join(this.directory,'packages',item.digest,'profile.json')),adapterRoot:path.join(this.directory,'packages',item.digest,'adapter')}))];
     const ids=new Map();for(const row of result){validateProfile(row.profile);const id=row.profile.app+':'+row.profile.id,previous=ids.get(id);if(previous&&canonical({...previous.profile,revoked:false})!==canonical({...row.profile,revoked:false}))throw compatError('INVALID_PROFILE','A profile ID cannot be reused for different contents');if(previous?.profile.revoked||(catalog.revoked??[]).includes(id))row.profile={...row.profile,revoked:true};ids.set(id,row);}
     const rows=[...ids.values()];
     for(const row of rows){
-      if(row.profile.evidence.stage!=='messaging-verified')continue;
+      if(!generated(row.profile))continue;
       const seed=ids.get(row.profile.app+':'+row.profile.evidence.seed);
       if(!seed||seed.profile.revoked||seed.profile.adapterDigest!==row.profile.adapterDigest)
         row.profile={...row.profile,revoked:true};
@@ -81,7 +86,8 @@ export class Compatibility {
   pin(selected){
     const hash=digest(canonical(selected.profile)),target=path.join(this.directory,'packages',hash),adapterRoot=path.join(target,'adapter');
     if(!fs.existsSync(path.join(target,'profile.json'))){fs.mkdirSync(adapterRoot,{recursive:true});for(const name of selected.profile.adapterFiles){const file=safeFile(adapterRoot,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.copyFileSync(safeFile(selected.adapterRoot,name),file);}if(adapterDigest(adapterRoot,selected.profile.adapterFiles)!==selected.profile.adapterDigest)throw compatError('ADAPTER_STALE','Adapter changed while copying immutable snapshot');atomicJson(path.join(target,'profile.json'),selected.profile);}
-    const history=readJson(path.join(this.directory,'history.json'),[]);if(!history.some(item=>item.digest===hash)){history.push({digest:hash});atomicJson(path.join(this.directory,'history.json'),history);}
+    const historyFile=path.join(this.directory,selected.profile.coreApiVersion===2?'history-v2.json':'history.json');
+    const history=readJson(historyFile,[]);if(!history.some(item=>item.digest===hash)){history.push({digest:hash});atomicJson(historyFile,history);}
     return {...selected,adapterRoot};
   }
   identity(){
@@ -122,7 +128,8 @@ export class Compatibility {
       try{selected=this.evaluate(app,inventory,state);}catch(error){const old=state.apps[app]??{};state.apps[app]={...old,...error.runningBuild?{runningBuild:error.runningBuild,fileStamp:error.fileStamp,generation:error.generation}:{},phase:'blocked',blockedReason:error.code,lastError:error.message};this.save(state);throw error;}
       const old=state.apps[app]??{};
       if(pid&&selected.runningBuild.pid!==pid)throw compatError('IDENTITY_MISMATCH','Requested PID is not the selected desktop main process');
-      if(!selected.profile.capabilities.includes(capability))throw compatError('CAPABILITY_UNSUPPORTED',`${capability} is not validated for this build`);
+      const required=selected.profile.coreApiVersion===2&&app==='codex'&&capability==='execution'?'create':capability;
+      if(!selected.profile.capabilities.includes(required))throw compatError('CAPABILITY_UNSUPPORTED',`${capability} is not validated for this build`);
       const circuit=old.circuits?.[capability];if(circuit&&circuit.generation===selected.generation&&circuit.profileDigest===selected.profileDigest)throw compatError('CONTRACT_MISMATCH',`${capability} is blocked after a native contract mismatch; activate a validated profile or restart/probe during maintenance`);
       if(old.transition&&old.transition.generation===selected.generation)throw compatError('REFRESH_DEFERRED_BUSY','An adapter transition is waiting for safe activation');
       if(old.transition){old.transition=null;this.save(state,{app,event:'transition.recoveredAfterProcessRestart'});}
@@ -192,7 +199,8 @@ export class Compatibility {
   async importPackage(directory){
     directory=path.resolve(directory);const profile=validateProfile(readJson(path.join(directory,'profile.json'))),adapterRoot=path.join(directory,'adapter');
     if(adapterDigest(adapterRoot,profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Imported package digest does not match');
-    return this.locked(()=>{const list=readJson(path.join(this.directory,'imports.json'),[]),hash=digest(canonical(profile)),target=path.join(this.directory,'packages',hash);
+    const importsFile=path.join(this.directory,profile.coreApiVersion===2?'imports-v2.json':'imports.json');
+    return this.locked(()=>{const list=readJson(importsFile,[]),hash=digest(canonical(profile)),target=path.join(this.directory,'packages',hash);
       const existing=this.profiles().find(row=>row.profile.id===profile.id&&row.profile.app===profile.app);
       if(existing){
         if(!existing.profile.revoked && canonical(existing.profile)===canonical(profile) &&
@@ -201,7 +209,7 @@ export class Compatibility {
         }
         throw compatError('INVALID_PROFILE','Profile ID already exists with different contents or is revoked');
       }
-      fs.mkdirSync(path.join(target,'adapter'),{recursive:true});for(const file of profile.adapterFiles){const from=safeFile(adapterRoot,file);if(fs.lstatSync(from).isSymbolicLink())throw compatError('INVALID_PROFILE','Package symlinks are forbidden');const to=safeFile(path.join(target,'adapter'),file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}if(adapterDigest(path.join(target,'adapter'),profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Imported adapter changed while copying');atomicJson(path.join(target,'profile.json'),profile);list.push({digest:hash});atomicJson(path.join(this.directory,'imports.json'),list);return {imported:true,profileId:profile.id};});
+      fs.mkdirSync(path.join(target,'adapter'),{recursive:true});for(const file of profile.adapterFiles){const from=safeFile(adapterRoot,file);if(fs.lstatSync(from).isSymbolicLink())throw compatError('INVALID_PROFILE','Package symlinks are forbidden');const to=safeFile(path.join(target,'adapter'),file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}if(adapterDigest(path.join(target,'adapter'),profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Imported adapter changed while copying');atomicJson(path.join(target,'profile.json'),profile);list.push({digest:hash});atomicJson(importsFile,list);return {imported:true,profileId:profile.id};});
   }
 }
 const coordinator=new Compatibility();

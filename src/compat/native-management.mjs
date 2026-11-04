@@ -25,9 +25,10 @@ export async function idleProbe(previous,app){
  return app==='claude'?lifecycleWire('maintenance',{payload:params}):executionWire('maintenance',params);
 }
 export async function attachProbe(selection){
- if(selection.app==='codex' && selection.profile.evidence.stage==='messaging-verified')return helperStatus(selection,'messaging');
+ const caps=selection.profile.capabilities;
+ if(selection.app==='codex' && !caps.some(c=>['create','execution','mcp'].includes(c)))return helperStatus(selection,'messaging');
  let python='python';try{python=JSON.parse(fs.readFileSync(sourcePath(ROOT,'runtime/supervisor/config.json'),'utf8')).python;}catch{}
- for(const kind of selection.app==='claude'?['claude']:['execution','mcp'].filter(cap=>selection.profile.capabilities.includes(cap))){
+ for(const kind of selection.app==='claude'?['claude']:['execution','mcp'].filter(cap=>caps.includes(cap)||cap==='execution'&&caps.includes('create'))){
   await new Promise((resolve,reject)=>{
    // Structured JSON on stdin preserves paths and avoids shell/argv quoting.
    const child=execFile(python,[sourcePath(ROOT,'native-attach.py'),kind],{windowsHide:true,timeout:60000,maxBuffer:1024*1024},(error,stdout)=>{try{const result=JSON.parse(stdout.trim().split('\n').at(-1));result.installed&&!error?resolve():reject(compatError(result.code??'ATTACHMENT_ERROR',result.error??'Attachment not confirmed'));}catch{reject(compatError('ATTACHMENT_ERROR','Native attachment failed; inspect update status'));}});child.stdin.end(JSON.stringify(selection));

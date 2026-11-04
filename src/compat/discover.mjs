@@ -104,10 +104,10 @@ export function locate(app, files) {
             [
               "addConversationStateCallback",
               "getConversation",
-              "startConversation",
-              "resumeConversation",
               "addApprovalRequestListener",
-            ].every((k) => methods.has(k))
+            ].every((k) => methods.has(k)) &&
+            (["startConversation","resumeConversation"].every(k=>methods.has(k)) ||
+             ["getConversationOrThrow","addConversationCallback"].every(k=>methods.has(k)))
           )
             hits.manager.push(row);
         },
@@ -160,7 +160,7 @@ export async function discover(
     .filter(
       ({ profile: p }) =>
         !p.revoked &&
-        p.evidence.stage !== "messaging-verified" &&
+        !["messaging-verified","capability-verified"].includes(p.evidence.stage) &&
         (app === "codex"
           ? p.manifests.execution?.connectionModuleId
           : p.manifests.claude?.transport === "main-renderer-rpc"),

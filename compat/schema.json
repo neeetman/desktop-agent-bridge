@@ -4,7 +4,7 @@
   "required": ["schemaVersion", "coreApiVersion", "id", "app", "platform", "arch", "packageVersion", "hashes", "adapterFiles", "adapterDigest", "capabilities", "manifests", "evidence"],
   "properties": {
     "schemaVersion": {"const": 1},
-    "coreApiVersion": {"const": 1},
+    "coreApiVersion": {"enum": [1, 2]},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"},
     "app": {"enum": ["codex", "claude"]},
     "platform": {"const": "win32"},
@@ -12,7 +12,7 @@
     "packageVersion": {"type": "string"},
     "adapterDigest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "adapterFiles": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
-    "capabilities": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["read", "send", "settings", "execution", "mcp", "identity"]}},
+    "capabilities": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["read", "send", "settings", "execution", "mcp", "identity", "create", "permissions"]}},
     "hashes": {"type": "object"},
     "manifests": {"type": "object"},
     "evidence": {"type": "object"},

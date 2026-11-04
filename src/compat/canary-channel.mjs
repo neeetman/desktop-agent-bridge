@@ -4,6 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { ROOT, readJson } from "./compatibility.mjs";
 import attach from "./canary-native.cjs";
+import operations from "./canary-operations.cjs";
 
 export async function openChannel(candidate, threadId, runId, duration) {
   const token = randomBytes(24).toString("hex"),
@@ -61,6 +62,8 @@ export async function openChannel(candidate, threadId, runId, duration) {
     token,
     runId,
     duration,
+    root:ROOT,
+    expiresAt:Date.now()+duration,
     port: server.address().port,
     adapterRoot: candidate.adapterRoot,
     manifest:
@@ -93,7 +96,7 @@ export async function openChannel(candidate, threadId, runId, duration) {
     JSON.stringify({
       build: candidate.build,
       adapterRoot: candidate.adapterRoot,
-      code: "(" + attach.toString() + ")(" + JSON.stringify(config) + ")",
+      code: "(" + attach.toString() + ")(" + JSON.stringify(config) + ","+operations.toString()+")",
     }),
   );
   const close = () => {
@@ -121,7 +124,7 @@ export async function openChannel(candidate, threadId, runId, duration) {
       return await new Promise((resolve, reject) => {
         timer = setTimeout(
           () => reject(Error("Validation " + method + " timed out")),
-          18000,
+          ["create","permissions","mcp"].includes(method)?85000:18000,
         );
         pending.set(id, { resolve, reject });
         socket.write(JSON.stringify({ id, method, text }) + "\n");

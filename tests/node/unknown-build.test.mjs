@@ -82,11 +82,9 @@ test("a previously unknown installed build becomes a quarantined candidate witho
   );
   fs.writeFileSync(path.join(resources, "../Claude.exe"), "fixture");
   fs.mkdirSync(path.join(root, "compat"));
-  const baseline = new Compatibility()
-    .profiles()
-    .filter((x) => x.profile.app === "claude" && !x.profile.revoked)
-    .at(-1);
-  const seed = baseline.profile;
+  const bundled=new Compatibility().root;
+  const catalog=JSON.parse(fs.readFileSync(path.join(bundled,'compat/catalog.json')));
+  const seed=catalog.profiles.map(file=>JSON.parse(fs.readFileSync(path.join(bundled,file)))).find(p=>p.app==='claude'&&!p.revoked&&p.manifests.claude.transport==='main-renderer-rpc');
   fs.writeFileSync(path.join(root, "compat/seed.json"), JSON.stringify(seed));
   fs.writeFileSync(
     path.join(root, "compat/catalog.json"),
@@ -95,7 +93,7 @@ test("a previously unknown installed build becomes a quarantined candidate witho
   for (const name of seed.adapterFiles) {
     const { sourcePath } = await import("../../src/lib/paths.mjs");
     fs.copyFileSync(
-      sourcePath(baseline.adapterRoot, name),
+      sourcePath(bundled, name),
       path.join(root, name),
     );
   }

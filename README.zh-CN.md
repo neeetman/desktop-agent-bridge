@@ -4,6 +4,8 @@
 
 在控制台「适配管理 → 未知版本 · 生成与验收」绑定两条专用测试会话，即可在检测到新指纹时自动生成候选并验收。通过后可导入消息适配包。[运行条件及命令](docs/unknown-builds.md)。
 
+关闭控制台后会收进 Windows 系统托盘。左键图标恢复窗口，右键可预览队列或退出控制台。主窗口与预览都会随系统即时切换浅色或深色主题。
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.4**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeTheme } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { tmpdir } = require("node:os");
@@ -8,8 +8,10 @@ const { createHash } = require("node:crypto");
 const root = path.resolve(__dirname, "../..");
 const page = pathToFileURL(path.join(__dirname, "index.html")).href;
 let window,
+  trayControl,
   updating = false;
 app.setName("Desktop Agent Bridge");
+nativeTheme.themeSource="system";
 app.setPath(
   "userData",
   path.join(
@@ -63,12 +65,26 @@ async function cli(...args) {
     [path.join(root, "bin/desktop-agent-bridge.mjs"), ...args],
   );
 }
+async function queueWithReviews() {
+      const queue = await local("runtime/router/connection.json", "/v1/queue");
+      const reviews = await read("runtime/console-reviews.json").catch(error => {
+        if (error.code === "ENOENT") return {};
+        throw error;
+      });
+      for (const row of queue.messages) {
+        const review = reviews[row.id];
+        if (review && review.stage === row.stage && review.jobStatus === row.jobStatus && review.reason === row.reason)
+          row.review = review.note;
+      }
+      return queue;
+}
+
 function checkedApp(v) {
   if (!["codex", "claude"].includes(v)) throw Error("Invalid desktop");
   return v;
 }
 function runCertification(app,threads,config) {
-  return run(config.node||"node",[path.join(root,"bin/desktop-agent-bridge.mjs"),"compat","certify","--app",app,"--claude-thread",threads.claude,"--codex-thread",threads.codex],undefined,600000);
+  return run(config.node||"node",[path.join(root,"bin/desktop-agent-bridge.mjs"),"compat","certify","--app",app,"--claude-thread",threads.claude,"--codex-thread",threads.codex],undefined,1020000);
 }
 const watchFile=path.join(root,"runtime/candidates/console-watch.json");
 async function watchSettings() {
@@ -204,6 +220,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
+    if(trayControl)return trayControl.show();
     if (window) {
       if (window.isMinimized()) window.restore();
       window.show();
@@ -224,19 +241,7 @@ if (!app.requestSingleInstanceLock()) {
         path.resolve(item.path).toLowerCase() === process.execPath.toLowerCase() &&
         item.args.length === 1 && path.resolve(item.args[0]).toLowerCase() === __filename.toLowerCase());
     });
-    bind("queue", async () => {
-      const queue = await local("runtime/router/connection.json", "/v1/queue");
-      const reviews = await read("runtime/console-reviews.json").catch(error => {
-        if (error.code === "ENOENT") return {};
-        throw error;
-      });
-      for (const row of queue.messages) {
-        const review = reviews[row.id];
-        if (review && review.stage === row.stage && review.jobStatus === row.jobStatus && review.reason === row.reason)
-          row.review = review.note;
-      }
-      return queue;
-    });
+    bind("queue",queueWithReviews);
     bind("desktops", async () => {
       const [result, deepseek, profiles] = await Promise.all([
         cli("doctor"),
@@ -270,11 +275,12 @@ if (!app.requestSingleInstanceLock()) {
       try {
         const {checkThreads}=await import("../compat/certify.mjs");
         checkThreads({codex,claude},[]);
-        if(!await confirm("向专用测试会话发送验收消息？","Codex "+codex+"\nClaude "+claude))return "";
+        if(!await confirm("运行桌面能力验收？","将向专用会话发消息，在隔离目录创建测试会话，并在空闲且保护规则允许时测试权限与 MCP 重载。\nCodex "+codex+"\nClaude "+claude))return "";
         const result=await runCertification(app,{claude,codex},await config());
-        if(!await confirm("验收通过，导入消息适配包？",result.profileId+"\n"+result.package))return "验收通过。适配包 "+result.package;
+        const summary=result.packages[app].capabilities.join(" · ");
+        if(!await confirm("导入按能力验收的适配包？",summary+"\n"+result.profileId+"\n"+result.package))return "已验证 "+summary+"。适配包 "+result.package;
         await cli("compat","import",result.package);
-        return "验收通过，已导入 "+result.profileId+"。报告 "+result.report;
+        return "已导入 "+result.profileId+"（"+summary+"）。报告 "+result.report;
       } finally {updating=false;}
     });
     bind("canary-watch",async (enabled,threads)=>{
@@ -320,7 +326,7 @@ if (!app.requestSingleInstanceLock()) {
       icon: path.join(__dirname, "bridge.ico"),
       minWidth: 820,
       minHeight: 600,
-      backgroundColor: "#f3f6fa",
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#191d2b" : "#f4f5fa",
       autoHideMenuBar: true,
       show: false,
       webPreferences: {
@@ -331,6 +337,12 @@ if (!app.requestSingleInstanceLock()) {
       },
     });
     const notifySize = () => window.webContents.send("bridge:maximized", window.isMaximized());
+    trayControl=require("./tray.cjs").installTray(window,async()=>{
+      const {messages}=await queueWithReviews();
+      return {label:"路由在线",pending:messages.filter(m=>["queued","waiting_for_adapter","dispatching","awaiting_ack"].includes(m.stage)).length,
+        read:messages.filter(m=>["acknowledged","replied"].includes(m.stage)).length,
+        issues:messages.filter(m=>["unknown","failed","interrupted"].includes(m.stage)&&!m.review).length};
+    });
     window.on("maximize", notifySize);
     window.on("unmaximize", notifySize);
     window.removeMenu();
