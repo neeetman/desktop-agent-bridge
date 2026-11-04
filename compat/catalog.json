@@ -4,6 +4,8 @@
     "compat/codex/codex-26.1027.3384.0-b833a39b336d7294.json",
     "compat/claude/claude-4.29.0-0cd7be3601771941.json",
     "compat/claude/claude-4.4212.0.0-93a6f90da0ee3e98.json",
-    "compat/codex/codex-26.1027.6604.0-ed30794196dee5bc.json"
+    "compat/codex/codex-26.1027.6604.0-ed30794196dee5bc.json",
+    "compat/codex/codex-26.1029.7803.0-77ed4ddc5b388ac8.json",
+    "compat/claude/claude-4.16336.0.0-ef9f3609d5b27f31.json"
   ]
 }

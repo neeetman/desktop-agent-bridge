@@ -154,7 +154,16 @@ export class Compatibility {
   async importPackage(directory){
     directory=path.resolve(directory);const profile=validateProfile(readJson(path.join(directory,'profile.json'))),adapterRoot=path.join(directory,'adapter');
     if(adapterDigest(adapterRoot,profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Imported package digest does not match');
-    return this.locked(()=>{const list=readJson(path.join(this.directory,'imports.json'),[]),hash=digest(canonical(profile)),target=path.join(this.directory,'packages',hash);if(this.profiles().some(row=>row.profile.id===profile.id&&row.profile.app===profile.app))throw compatError('INVALID_PROFILE','Profile ID already exists');fs.mkdirSync(path.join(target,'adapter'),{recursive:true});for(const file of profile.adapterFiles){const from=safeFile(adapterRoot,file);if(fs.lstatSync(from).isSymbolicLink())throw compatError('INVALID_PROFILE','Package symlinks are forbidden');const to=safeFile(path.join(target,'adapter'),file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}if(adapterDigest(path.join(target,'adapter'),profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Imported adapter changed while copying');atomicJson(path.join(target,'profile.json'),profile);list.push({digest:hash});atomicJson(path.join(this.directory,'imports.json'),list);return {imported:true,profileId:profile.id};});
+    return this.locked(()=>{const list=readJson(path.join(this.directory,'imports.json'),[]),hash=digest(canonical(profile)),target=path.join(this.directory,'packages',hash);
+      const existing=this.profiles().find(row=>row.profile.id===profile.id&&row.profile.app===profile.app);
+      if(existing){
+        if(!existing.profile.revoked && canonical(existing.profile)===canonical(profile) &&
+            adapterDigest(existing.adapterRoot,profile.adapterFiles)===profile.adapterDigest){
+          return {imported:false,alreadyAvailable:true,profileId:profile.id};
+        }
+        throw compatError('INVALID_PROFILE','Profile ID already exists with different contents or is revoked');
+      }
+      fs.mkdirSync(path.join(target,'adapter'),{recursive:true});for(const file of profile.adapterFiles){const from=safeFile(adapterRoot,file);if(fs.lstatSync(from).isSymbolicLink())throw compatError('INVALID_PROFILE','Package symlinks are forbidden');const to=safeFile(path.join(target,'adapter'),file);fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}if(adapterDigest(path.join(target,'adapter'),profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Imported adapter changed while copying');atomicJson(path.join(target,'profile.json'),profile);list.push({digest:hash});atomicJson(path.join(this.directory,'imports.json'),list);return {imported:true,profileId:profile.id};});
   }
 }
 const coordinator=new Compatibility();

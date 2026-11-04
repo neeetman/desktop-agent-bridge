@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "coreApiVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "app": "codex",
+  "id": "codex-26.1029.7803.0-77ed4ddc5b388ac8",
+  "packageVersion": "26.1029.7803.0",
+  "capabilities": [
+    "read",
+    "send",
+    "settings",
+    "execution",
+    "mcp"
+  ],
+  "adapterFiles": [
+    "codex-main-execution.cjs",
+    "codex-main-mcp.cjs",
+    "codex-runtime.cjs",
+    "execution-policy.cjs",
+    "helper-binding.cjs",
+    "claude-attach-agent.js"
+  ],
+  "manifests": {
+    "execution": {
+      "version": "26.1029.7803.0",
+      "executableSha256": "74dcbc67421c5d5406ea5e4cc80d9c8d8a05d0df62f1d7be5690f090f182e71f",
+      "chromeSha256": "9fc2f8105c6c5a6a2d33000afb79ecf6662ef4047cee1d1143e8354ea1d29b29",
+      "asarSha256": "77ed4ddc5b388ac8b29f5035f9c98f982b095df55aad6fa6c27bb80d763b9691",
+      "connectionModule": ".vite/build/early-bootstrap-339-f66dad1753c54789.js",
+      "connectionModuleId": 57757,
+      "managerClass": "Pg",
+      "managerModuleId": 12179,
+      "helperRevision": "af0fc1fd7dcafe79"
+    },
+    "mcp": {
+      "version": "26.1029.7803.0",
+      "executableSha256": "74dcbc67421c5d5406ea5e4cc80d9c8d8a05d0df62f1d7be5690f090f182e71f",
+      "chromeSha256": "9fc2f8105c6c5a6a2d33000afb79ecf6662ef4047cee1d1143e8354ea1d29b29",
+      "asarSha256": "77ed4ddc5b388ac8b29f5035f9c98f982b095df55aad6fa6c27bb80d763b9691",
+      "connectionModule": ".vite/build/early-bootstrap-339-f66dad1753c54789.js",
+      "connectionModuleId": 57757,
+      "reloadOnAttach": false,
+      "helperRevision": "c8326d9e4c561345"
+    }
+  },
+  "hashes": {
+    "executableSha256": "74dcbc67421c5d5406ea5e4cc80d9c8d8a05d0df62f1d7be5690f090f182e71f",
+    "asarSha256": "77ed4ddc5b388ac8b29f5035f9c98f982b095df55aad6fa6c27bb80d763b9691",
+    "chromeSha256": "9fc2f8105c6c5a6a2d33000afb79ecf6662ef4047cee1d1143e8354ea1d29b29"
+  },
+  "adapterDigest": "3ffb92e6d3cf39f11ad8b1651956a0ed186509f29e726f6b8f0f45a3a02c34c8",
+  "revoked": false,
+  "evidence": {
+    "baseline": "Installed Windows desktop and live read-only contract probe, 2026-11-04",
+    "validated": [
+      "connected local AppServerConnection",
+      "local conversation manager and conversation methods"
+    ],
+    "record": "docs/validation-desktops-1104.md"
+  }
+}

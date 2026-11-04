@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "coreApiVersion": 1,
+  "platform": "win32",
+  "arch": "x64",
+  "app": "claude",
+  "id": "claude-4.16336.0.0-ef9f3609d5b27f31",
+  "packageVersion": "4.16336.0.0",
+  "capabilities": [
+    "read",
+    "send",
+    "identity"
+  ],
+  "adapterFiles": [
+    "claude-main-attach.cjs",
+    "claude-renderer.mjs",
+    "helper-binding.cjs",
+    "claude-attach-agent.js"
+  ],
+  "manifests": {
+    "claude": {
+      "desktopVersion": "4.16336.0",
+      "executableSha256": "aa4a2a4fabca51f618c2fb92169a1dd4b579ca1485f119b8bfa436485e0f57a3",
+      "asarSha256": "ef9f3609d5b27f31b2cf43b205c496270a0e10348f013e6d17bd7871ea4daa4a",
+      "fridaVersion": "17.9.1",
+      "sessionModule": ".vite/build/index.chunk-N6aotG6D.js",
+      "transport": "main-renderer-rpc",
+      "workerPidField": "cliPid"
+    }
+  },
+  "hashes": {
+    "executableSha256": "aa4a2a4fabca51f618c2fb92169a1dd4b579ca1485f119b8bfa436485e0f57a3",
+    "asarSha256": "ef9f3609d5b27f31b2cf43b205c496270a0e10348f013e6d17bd7871ea4daa4a"
+  },
+  "adapterDigest": "e030e8ca989f40354a4ae88946925402e06cce8c290ed8736693624db0b215bc",
+  "revoked": false,
+  "evidence": {
+    "baseline": "Installed Windows desktop and live read-only contract probe, 2026-11-04",
+    "validated": [
+      "LocalSessions getSessionList",
+      "renderer session methods",
+      "main session manager export"
+    ],
+    "record": "docs/validation-desktops-1104.md"
+  }
+}

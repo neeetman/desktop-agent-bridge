@@ -83,8 +83,25 @@ class Console:
         tabs.pack(fill='both', expand=True, padx=12, pady=12)
         messages = ttk.Frame(tabs, padding=10)
         updates = ttk.Frame(tabs, padding=10)
+        overview = ttk.Frame(tabs, padding=16)
+        tabs.add(overview, text='Overview')
         tabs.add(messages, text='Message queue')
         tabs.add(updates, text='Desktop compatibility')
+        self.summary = tk.StringVar()
+        ttk.Label(messages, textvariable=self.summary, font=('Segoe UI', 12, 'bold')).pack(anchor='w', pady=(0,8))
+        ttk.Label(overview, text='Desktop Agent Bridge', font=('Segoe UI', 20, 'bold')).pack(anchor='w')
+        ttk.Label(overview, text='Installed desktop builds and selected adapters').pack(anchor='w', pady=(4, 12))
+        self.desktops = ttk.Treeview(overview, columns=('app','build','adapter','state'), show='headings', height=3)
+        for column, title, width in [('app','Desktop',100),('build','Version',150),('adapter','Adapter package',360),('state','Coordinator state',160)]:
+            self.desktops.heading(column, text=title)
+            self.desktops.column(column, width=width)
+        self.desktops.pack(fill='x')
+        ttk.Label(overview, textvariable=self.summary, font=('Segoe UI', 12)).pack(anchor='w', pady=12)
+        actions = ttk.Frame(overview)
+        actions.pack(anchor='w')
+        ttk.Button(actions, text='Refresh desktops', command=self.refresh_desktops).pack(side='left')
+        ttk.Button(actions, text='Inspect receipts', command=lambda:tabs.select(messages)).pack(side='left', padx=6)
+        ttk.Button(actions, text='Manage adapters', command=lambda:tabs.select(updates)).pack(side='left')
         self.query = tk.StringVar()
         ttk.Label(messages, text='Filter by message ID, session, app or status').pack(anchor='w')
         ttk.Entry(messages, textvariable=self.query).pack(fill='x', pady=6)
@@ -111,15 +128,33 @@ class Console:
                      width=10).pack(side='left')
         self.profile = tk.StringVar()
         ttk.Entry(bar, textvariable=self.profile, width=38).pack(side='left', padx=6)
-        for label, action in [('Check / match', self.plan), ('Import local profile', self.import_profile), ('Check GitHub', self.upstream),
+        for label, action in [('Check / match', self.plan), ('Check GitHub', self.upstream),
                               ('Activate when idle', self.activate)]:
             ttk.Button(bar, text=label, command=action).pack(side='left', padx=3)
+        package_bar = ttk.LabelFrame(updates, text='Deploy a local adapter package', padding=8)
+        package_bar.pack(fill='x', pady=10)
+        self.package_path = tk.StringVar()
+        ttk.Entry(package_bar, textvariable=self.package_path).pack(side='left', fill='x', expand=True)
+        ttk.Button(package_bar, text='Browse…', command=self.browse_package).pack(side='left', padx=4)
+        self.deploy_button = ttk.Button(package_bar, text='Import package', command=self.import_profile)
+        self.deploy_button.pack(side='left')
+        ttk.Button(bar, text='Probe live helper', command=self.probe).pack(side='left')
         self.output = tk.Text(updates, wrap='word')
         self.output.pack(fill='both', expand=True, pady=8)
         self.output.insert('end', 'Check the running desktop to find its matching validated profile. '
                            'For a new build, import a trusted profile directory and check the match before activation.')
+        self.refresh_desktops()
         self.refresh()
         self.window.after(100, self.collect)
+
+    def refresh_desktops(self):
+        def display(result):
+            self.desktops.delete(*self.desktops.get_children())
+            for app, row in result['apps'].items():
+                build = row.get('runningBuild') or row.get('installedBuild') or {}
+                self.desktops.insert('', 'end', values=(app, build.get('packageVersion') or build.get('version'),
+                    row.get('profileId') or '—', row.get('code') or row.get('phase')))
+        self.run('overview', lambda:command('doctor'), display)
 
     def run(self, key, operation, done):
         if key in self.busy:
@@ -153,6 +188,10 @@ class Console:
         if rows != self.rows:
             self.rows = rows
             self.render()
+        stages = [row['stage'] for row in rows]
+        self.summary.set('     '.join(f'{name}  {stages.count(stage)}' for stage,name in
+            [('queued','Queued'),('waiting_for_adapter','Waiting for adapter'),('unknown','Uncertain'),
+             ('acknowledged','Acknowledged'),('replied','Replied')]))
         self.status.set(f'{len(rows)} messages • refresh every 3 seconds')
 
     def render(self):
@@ -192,13 +231,34 @@ class Console:
             return plan
         self.run('update',check,display)
 
-    def import_profile(self):
+    def browse_package(self):
         folder = filedialog.askdirectory(title='Select trusted adapter package')
         if folder:
-            def display(result):
-                self.profile.set(result['profileId'])
-                self.show(result)
-            self.run('update',lambda:command('compat','import',folder),display)
+            self.package_path.set(folder)
+
+    def import_profile(self):
+        folder = self.package_path.get().strip()
+        if not folder:
+            self.show('Choose the package directory containing profile.json.')
+            return
+        def deploy():
+            app = json.loads((Path(folder)/'profile.json').read_text(encoding='utf8'))['app']
+            imported = command('compat','import',folder)
+            return app, imported
+        def display(result):
+            app, imported = result
+            self.app.set(app)
+            self.profile.set(imported['profileId'])
+            self.show(imported)
+        self.run('update',deploy,display)
+
+    def probe(self):
+        app = self.app.get()
+        def display(result):
+            desktop = result['apps'][app]
+            self.show(dict(desktop=desktop['runningBuild']['packageVersion'], profile=desktop['profileId'],
+                           helper=result['probe']['kind'], ready=result['probe']['ready']))
+        self.run('update',lambda:command('doctor','--app',app,'--probe'),display)
 
     def upstream(self):
         app = self.app.get()
