@@ -1,5 +1,17 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+const maximize = document.querySelector('[data-window="toggleMaximize"]');
+function syncWindowState(flag) {
+  maximize.classList.toggle("is-maximized", flag);
+  maximize.title = flag ? "还原" : "最大化";
+  maximize.setAttribute("aria-label", maximize.title);
+}
+window.bridge.onMaximized(syncWindowState);
+window.bridge.windowAction("state").then(syncWindowState);
+document.querySelector(".caption-controls").addEventListener("click", event => {
+  const button = event.target.closest("button[data-window]");
+  if (button) window.bridge.windowAction(button.dataset.window);
+});
 const esc = (value) =>
   String(value ?? "").replace(
     /[&<>"']/g,
@@ -219,12 +231,15 @@ function renderDesktops() {
     })
     .join("");
 }
+function queueGroup(row) {
+  return row.review ? "reviewed" : group(row.stage);
+}
 function renderRows() {
   const q = $("search").value.trim().toLowerCase(),
     f = $("filter").value;
   const filtered = state.rows.filter(
     (r) =>
-      (!f || group(r.stage) === f) &&
+      (!f || queueGroup(r) === f) &&
       (!q || JSON.stringify(r).toLowerCase().includes(q)),
   );
   const size = state.page === "home" ? 5 : 20;
@@ -283,7 +298,7 @@ function renderRows() {
         label +
         "</span><b>" +
         (key
-          ? state.rows.filter((r) => group(r.stage) === key).length
+          ? state.rows.filter((r) => queueGroup(r) === key).length
           : state.rows.length) +
         "</b><i>" +
         icon(glyph) +
@@ -327,6 +342,7 @@ function details(id) {
     ["来源会话", r.from.app + " / " + r.from.threadId],
     ["目标会话", r.to.app + " / " + r.to.threadId],
     ["队列状态", r.jobStatus],
+    ...(r.review ? [["复核记录", r.review]] : []),
   ];
   $("detail-body").innerHTML =
     "<h2>投递详情　" +

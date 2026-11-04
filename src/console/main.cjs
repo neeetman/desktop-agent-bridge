@@ -178,7 +178,19 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   app.whenReady().then(async () => {
-    bind("queue", () => local("runtime/router/connection.json", "/v1/queue"));
+    bind("queue", async () => {
+      const queue = await local("runtime/router/connection.json", "/v1/queue");
+      const reviews = await read("runtime/console-reviews.json").catch(error => {
+        if (error.code === "ENOENT") return {};
+        throw error;
+      });
+      for (const row of queue.messages) {
+        const review = reviews[row.id];
+        if (review && review.stage === row.stage && review.jobStatus === row.jobStatus && review.reason === row.reason)
+          row.review = review.note;
+      }
+      return queue;
+    });
     bind("desktops", async () => {
       const [result, deepseek, profiles] = await Promise.all([
         cli("doctor"),
@@ -202,7 +214,18 @@ if (!app.requestSingleInstanceLock()) {
       if (typeof value === "string" && value.length <= 1024)
         clipboard.writeText(value);
     });
+    bind("window", (action) => {
+      switch (action) {
+        case "state": return window.isMaximized();
+        case "minimize": return window.minimize();
+        case "toggleMaximize":
+          return window.isMaximized() ? window.unmaximize() : window.maximize();
+        case "close": return window.close();
+        default: throw Error("Invalid window action");
+      }
+    });
     window = new BrowserWindow({
+      frame: false,
       width: 1320,
       height: 860,
       icon: path.join(__dirname, "bridge.ico"),
@@ -218,6 +241,9 @@ if (!app.requestSingleInstanceLock()) {
         nodeIntegration: false,
       },
     });
+    const notifySize = () => window.webContents.send("bridge:maximized", window.isMaximized());
+    window.on("maximize", notifySize);
+    window.on("unmaximize", notifySize);
     window.removeMenu();
     window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     window.webContents.on("will-navigate", (e) => e.preventDefault());

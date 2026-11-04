@@ -44,8 +44,19 @@
     </aside>
     <main>
       <header>
-        <span id="crumb">工作空间　/　通信总览</span
-        ><span class="live" id="network">正在连接</span>
+        <span id="crumb">工作空间　/　通信总览</span>
+        <span class="live" id="network">正在连接</span>
+        <div class="caption-controls" role="group" aria-label="窗口控制">
+          <button data-window="minimize" aria-label="最小化" title="最小化">
+            <svg viewBox="0 0 16 16"><path d="M3 9h10"/></svg>
+          </button>
+          <button data-window="toggleMaximize" aria-label="最大化" title="最大化">
+            <svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1.4" class="maximize-icon"/><path class="restore-icon" d="M5 3h8v8 M3 5h8v8H3z"/></svg>
+          </button>
+          <button data-window="close" aria-label="关闭窗口" title="关闭窗口">
+            <svg viewBox="0 0 16 16"><path d="m4 4 8 8m0-8-8 8"/></svg>
+          </button>
+        </div>
       </header>
       <section class="content">
         <div class="title-line">
@@ -110,6 +121,7 @@
                 <option value="delivered">已投递</option>
                 <option value="read">已确认 / 已回复</option>
                 <option value="issue">需检查</option>
+                <option value="reviewed">已复核</option>
               </select>
             </div>
             <table>

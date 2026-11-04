@@ -158,6 +158,41 @@ header {
   font-size: 12px;
   background: #fafcfd;
 }
+main > header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  -webkit-app-region: drag;
+  user-select: none;
+  gap: 18px;
+  padding-right: 10px;
+  background: #f8fbfd;
+}
+.brand { -webkit-app-region: drag; user-select: none; }
+#crumb { margin-right: auto; }
+.caption-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  -webkit-app-region: no-drag;
+}
+.caption-controls button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 30px;
+  padding: 0;
+  border-radius: 6px;
+  color: #516979;
+}
+.caption-controls svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.caption-controls button:hover { color: var(--ink); background: #e3ebf0; }
+.caption-controls button:active { background: #d2dfe7; }
+.caption-controls [data-window="close"]:hover { color: #fff; background: #b73f4c; }
+.restore-icon, .is-maximized .maximize-icon { display: none; }
+.is-maximized .restore-icon { display: inline; }
 .live {
   display: inline-flex;
   align-items: center;
