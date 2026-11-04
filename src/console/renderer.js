@@ -159,6 +159,12 @@ function phase(name) {
     "待检查"
   );
 }
+function phaseTone(name) {
+  if (name === 'deepseek') return state.deepseek === true ? 'read' : state.deepseek === false ? 'issue' : 'neutral';
+  const phase = state.apps[name]?.phase;
+  if (phase === 'ready' || phase === 'attached') return 'read';
+  return phase === 'blocked' ? 'issue' : 'neutral';
+}
 function version(row) {
   return (
     row?.runningBuild?.packageVersion || row?.installedBuild?.version || "—"
@@ -167,15 +173,15 @@ function version(row) {
 function workerSummary(app) {
   const workers = (state.workers || []).filter(worker => worker.app === app);
   if (state.unverifiedWorkerApps?.includes(app)) return '<p class="meta">暂时无法核验 MCP 进程，请刷新后再查看。</p>';
-  if (!workers.length) return '<p class="meta">尚无运行中的 MCP worker 记录</p>';
+  if (!workers.length) return '<p class="meta">暂无已核实的 MCP 进程</p>';
   const rows = workers.map(worker => {
     const status = !worker.revision ? '版本未知' : worker.revision === state.installedRevision ? '当前版本' : '建议重载';
     return '<li>' + esc(worker.threadId || '进程 ' + worker.pid) + ' · ' + status + '</li>';
   });
   const stale = workers.filter(worker => worker.revision && worker.revision !== state.installedRevision).length;
   const hint = app === 'claude' ? '空闲时可重连指定会话。' : '在空闲且无受保护会话时全局重载。';
-  return '<details><summary>MCP 进程 · ' + workers.length + ' 个，' + stale +
-    ' 个建议重载</summary><ul>' + rows.join('') + '</ul><p>' + hint + '</p></details>';
+  return '<details><summary>MCP 进程 · ' + workers.length + ' 个，' + stale + ' 个建议重载' +
+    '</summary><ul>' + rows.join('') + '</ul><p>' + hint + '</p></details>';
 }
 function renderDesktops() {
   $("endpoints").innerHTML = names
@@ -187,7 +193,7 @@ function renderDesktops() {
         apps[n] +
         "</b><small>" +
         esc(n === "deepseek" ? "Harness" : version(state.apps[n])) +
-        '</small><span class="state">' +
+        '</small><span class="state ' + phaseTone(n) + '">' +
         esc(phase(n)) +
         "</span></div>",
     )
@@ -195,7 +201,7 @@ function renderDesktops() {
   const previous = Object.fromEntries(
     [...$("packages").querySelectorAll("select")].map((e) => [
       e.dataset.app,
-      e.value,
+      { value: e.options.length > 1 ? e.value : undefined, expanded: e.closest("article").querySelector("details")?.open },
     ]),
   );
   $("packages").innerHTML = names
@@ -203,60 +209,29 @@ function renderDesktops() {
     .map((n) => {
       const row = state.apps[n] || {},
         profiles = state.profiles.filter((p) => p.app === n),
-        selected = previous[n] || row.profileId;
-      const buttons = [
-        ["probe", "检查连接"],
-        ["local", "导入本机包"],
-        ["upstream", "检查 GitHub"],
-        ["activate", "空闲时激活"],
-      ];
-      return (
-        '<article class="package"><div class="package-head">' +
-        symbol(n) +
-        "<h2>" +
-        apps[n] +
-        '</h2><span class="pill">' +
-        esc(phase(n)) +
-        '</span></div><div class="meta-grid"><div><label>运行版本</label><b>' +
-        esc(version(row)) +
-        '</b></div><div><label>匹配的配置</label><span class="meta">' +
-        esc(row.profileId || row.code || "尚未匹配") +
-        '</span></div></div>' + workerSummary(n) + '<div class="buttons"><select data-app="' +
-        n +
-        '" aria-label="候选适配包"><option value="">自动匹配</option>' +
-        profiles
-          .map(
-            (p) =>
-              "<option " +
-              (p.id === selected ? "selected " : "") +
-              'value="' +
-              esc(p.id) +
-              '">' +
-              esc(p.id) +
-              "</option>",
-          )
-          .join("") +
-        "</select>" +
-        buttons
-          .map(
-            ([a, t]) =>
-              '<button data-app="' +
-              n +
-              '" data-action="' +
-              a +
-              '" ' +
-              (state.busy ? "disabled " : "") +
-              'class="' +
-              (a === "activate" ? "primary" : "") +
-              '">' +
-              t +
-              "</button>",
-          )
-          .join("") +
-        "</div></article>"
-      );
+        selected = previous[n]?.value ?? row.profileId;
+      const button = (action, title, primary = false) =>
+        '<button data-app="' + n + '" data-action="' + action + '" class="' +
+        (primary ? 'primary' : 'secondary') + '"' + (state.busy ? ' disabled' : '') + '>' + title + '</button>';
+      const options = profiles.map(profile => '<option value="' + esc(profile.id) + '"' +
+        (profile.id === selected ? ' selected' : '') + '>' + esc(profile.id) + '</option>').join('');
+      const tone = phaseTone(n);
+      return '<article class="package"><div class="package-head">' + symbol(n) + '<h2>' + apps[n] +
+        '</h2><span class="pill ' + tone + '">' + esc(phase(n)) + '</span></div>' +
+        '<div class="package-info"><div><span>运行版本</span><b>' + esc(version(row)) +
+        '</b></div><div><span>匹配配置</span><code>' + esc(row.profileId || row.code || '尚未匹配') +
+        '</code></div></div><div class="worker-info">' + workerSummary(n) + '</div>' +
+        '<div class="package-actions">' + button('probe','检查连接') + button('upstream','检查 GitHub') +
+        button('local','导入本机包') + '</div><div class="activation"><label for="profile-' + n +
+        '">激活配置</label><div><select id="profile-' + n + '" data-app="' + n +
+        '"><option value="">自动匹配</option>' + options + '</select>' + button('activate','空闲时激活',true) +
+        '</div></div></article>';
     })
     .join("");
+  for (const select of $("packages").querySelectorAll("select")) {
+    const details = select.closest("article").querySelector("details");
+    if (details && previous[select.dataset.app]?.expanded) details.open = true;
+  }
 }
 function queueGroup(row) {
   return row.review ? "reviewed" : group(row.stage);

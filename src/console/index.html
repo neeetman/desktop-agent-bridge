@@ -146,13 +146,19 @@
           </div>
         </div>
         <section id="adapters" hidden>
-          <div class="section-line"><h2>桌面适配包</h2></div>
-          <section class="package">
-            <label><input id="login-startup" type="checkbox" disabled /> 登录 Windows 后打开控制台</label>
-            <small class="meta" id="startup-note" role="status"></small>
-          </section>
+          <div class="section-line"><div><h2>桌面适配包</h2><p class="section-note">按运行中的桌面构建匹配适配包。未知构建需先通过接口验证。</p></div></div>
           <div id="packages"></div>
           <div class="result" id="result" role="status" hidden></div>
+          <section class="preferences" aria-labelledby="preferences-heading">
+            <h2 id="preferences-heading">启动偏好</h2>
+            <label class="preference-row" for="login-startup">
+              <span class="setting-icon"><i data-icon="monitor"></i></span>
+              <span class="preference-copy"><strong>登录时打开控制台</strong>
+                <small>进入 Windows 后显示本机工作区</small></span>
+              <small id="startup-note" role="status"></small>
+              <input class="switch" id="login-startup" type="checkbox" role="switch" aria-label="登录 Windows 后打开控制台" disabled />
+            </label>
+          </section>
         </section>
       </section>
     </main>
