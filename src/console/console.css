@@ -716,3 +716,9 @@ dd {
 .search:focus-within { outline:2px solid #8177bc; outline-offset:1px; }
 
 .section-note { color: var(--sub); font-size: 12px; margin-top: 5px; }
+.canary-panel { margin-top:16px; padding:16px; background:white; border:1px solid #dce1ed; border-radius:12px; }
+.canary-panel summary { cursor:pointer; font-weight:600; }
+.canary-panel p { font-size:13px; color:var(--sub); overflow-wrap:anywhere; }
+.canary-panel form { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+.canary-panel label { flex:1 1 150px; font-size:12px; }
+.canary-panel form input,.canary-panel form select { display:block; width:100%; padding:8px; margin-top:4px; border:1px solid #bdc5d5; border-radius:6px; }

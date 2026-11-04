@@ -2,6 +2,8 @@
 
 运行 `desktop-agent-bridge console`（源码安装使用 `node bin/desktop-agent-bridge.mjs console`）打开本机控制台。可按消息 ID、会话或状态筛选队列，检查匹配的桌面适配配置、从 GitHub 查找匹配当前构建的适配包或导入可信本地包，并在空闲时激活。控制台采用 Electron，提供桌面连接图、可筛选的消息队列和逐条投递时间线。安装时请保留 npm 可选依赖。未知构建需要经过验证的匹配配置。
 
+在控制台「适配管理 → 未知版本 · 生成与验收」绑定两条专用测试会话，即可在检测到新指纹时自动生成候选并验收。通过后可导入消息适配包。[运行条件及命令](docs/unknown-builds.md)。
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.4**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。

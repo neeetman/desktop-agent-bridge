@@ -26,14 +26,26 @@ export async function main(args){
    return;
   }else if(args[0]==='doctor'){
    result=await coordinator.doctor(app);
-   if(args.includes('--probe')){if(!app)throw compatError('INVALID_ARGUMENT','--probe requires --app');const selected=await coordinator.resolve(app,app==='codex'?'execution':'read');result.probe=await helperStatus(selected,app==='codex'?'execution':'claude');result.passive=false;}
+   if(args.includes('--probe')){
+    if(!app)throw compatError('INVALID_ARGUMENT','--probe requires --app');
+    const kind=app==='claude'?'claude':result.apps.codex?.capabilities?.includes('execution')?'execution':'messaging';
+    const selected=await coordinator.resolve(app,kind==='execution'?'execution':'read');
+    result.probe=await helperStatus(selected,kind);result.passive=false;
+   }
   }else if(args[0]==='compat'){
    if(args[1]==='list')result={profiles:coordinator.profiles().map(({profile})=>({id:profile.id,app:profile.app,version:profile.packageVersion,revoked:profile.revoked,adapterDigest:profile.adapterDigest,capabilities:profile.capabilities}))};
    else if(args[1]==='import'){if(!args[2])throw compatError('INVALID_ARGUMENT','A local package directory is required');result=await coordinator.importPackage(args[2]);}
    else {
     if(!app)throw compatError('INVALID_ARGUMENT','--app is required');
     const id=option(args,'--profile');
-    if(args[1]==='plan')result=await coordinator.plan(app,id);
+    if(args[1]==='discover'){
+      const {discover}=await import('../compat/discover.mjs');
+      const {folder,contract,profile}=await discover(app);
+      result={stage:'candidate',folder,contract,profileId:profile.id};
+    }else if(args[1]==='certify'){
+      const {certify}=await import('../compat/certify.mjs');
+      result=await certify(app,{codex:option(args,'--codex-thread'),claude:option(args,'--claude-thread')});
+    }else if(args[1]==='plan')result=await coordinator.plan(app,id);
     else if(args[1]==='activate'){if(!id||!args.includes('--when-idle'))throw compatError('INVALID_ARGUMENT','activate requires --profile and --when-idle');result=await activateProfile(app,id);}
     else if(args[1]==='rollback'){const previous=coordinator.state().apps[app]?.previousProfileId;if(!previous)throw compatError('NO_ROLLBACK','No previous profile is recorded');result=await activateProfile(app,previous);}
     else if(args[1]==='recover')result=await coordinator.recover(app);
@@ -43,7 +55,7 @@ export async function main(args){
   }else if(args[0]==='install'){
    if(process.platform!=='win32')throw compatError('UNSUPPORTED_PLATFORM','Desktop installation requires Windows');
    const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',sourcePath(ROOT,'install.ps1'),...args.slice(1)],{stdio:'inherit',windowsHide:true});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});return;
-  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude] [--probe]','compat list','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>']};
+  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude] [--probe]','compat list','compat discover --app <app>','compat certify --app <app> --codex-thread <uuid> --claude-thread <local_uuid>','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>']};
   console.log(JSON.stringify(result,null,2));
  }catch(error){console.error(JSON.stringify({error:error.message,code:error.code??'BRIDGE_ERROR',dispatchNotStarted:error.dispatchNotStarted??false}));process.exitCode=1;}
 }

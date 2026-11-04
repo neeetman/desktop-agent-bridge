@@ -2,6 +2,8 @@
 
 Run `desktop-agent-bridge console` (from a checkout, `node bin/desktop-agent-bridge.mjs console`) to monitor delivery, search by caller or router message ID, inspect the matching desktop profile, check GitHub for an exact build match or import a trusted local adapter package, and activate it when idle. The Electron console includes a connection map, a searchable queue and individual delivery timelines. Install optional npm dependencies to run it. New builds require a validated matching profile.
 
+For a previously unseen build, the console can discover a structural candidate and validate messaging on two dedicated chats. [Automatic validation and CLI commands](docs/unknown-builds.md).
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 An open-source, local session bridge for **Codex Desktop, Claude Code in Claude Desktop, and DeepSeek Harness on Windows**. Desktop agents can send messages, receive replies, request decisions, and wake the original session through MCP.

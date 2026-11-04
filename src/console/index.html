@@ -149,6 +149,18 @@
           <div class="section-line"><div><h2>桌面适配包</h2><p class="section-note">按运行中的桌面构建匹配适配包。未知构建需先通过接口验证。</p></div></div>
           <div id="packages"></div>
           <div class="result" id="result" role="status" hidden></div>
+            <details class="canary-panel"><summary>未知版本 · 生成与验收</summary>
+              <p>填入两条专用测试会话的 ID。验收将发送三轮测试消息，核对消费回执后生成本机适配包。</p>
+              <form id="certify-form">
+                <label>生成适配包<select id="certify-app"><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
+                <label>Codex 测试会话<input id="certify-codex" required autocomplete="off" placeholder="会话 UUID"></label>
+                <label>Claude 测试会话<input id="certify-claude" required autocomplete="off" placeholder="local_…"></label>
+                <button class="primary">开始验收</button>
+              </form><p id="certify-result" role="status"></p>
+              <label class="preference-row" for="canary-watch"><span class="preference-copy"><strong>检测到未知构建时自动验收</strong><small>控制台运行期间生效，每组指纹只尝试一次</small></span>
+                <input class="switch" id="canary-watch" type="checkbox" role="switch"></label>
+              <p id="canary-watch-status" role="status"></p>
+            </details>
           <section class="preferences" aria-labelledby="preferences-heading">
             <h2 id="preferences-heading">启动偏好</h2>
             <label class="preference-row" for="login-startup">

@@ -3,11 +3,15 @@ import fs from 'node:fs';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import {withCapability} from '../../compat/compatibility.mjs';
+import {withCapability,compatError} from '../../compat/compatibility.mjs';
 export async function lifecycle(method, options={}) {
   if(method==='status')return lifecycleWire(method,options);
   const capability=method==='native'?['start','sendMessage','setModel','setEffort','warmSession','updateSession','mcpReconnect','stop'].includes(options.payload?.nativeMethod)?'send':'read':'identity';
-  return withCapability('claude',capability,selection=>lifecycleWire(method,{...options,payload:{...options.payload,binding:selection.binding,expiresAt:Date.now()+60000}}));
+  return withCapability('claude',capability,selection=>{
+    if(selection.profile.evidence.stage==='messaging-verified' && capability==='send' && options.payload.nativeMethod!=='sendMessage')
+      throw compatError('CAPABILITY_UNSUPPORTED','This profile is validated for existing-chat messaging only');
+    return lifecycleWire(method,{...options,payload:{...options.payload,binding:selection.binding,expiresAt:Date.now()+60000}});
+  });
 }
 export function lifecycleWire(method, { pipe = '\\\\.\\pipe\\claude-gui-bridge-control', connectionFile = fileURLToPath(projectURL("runtime/claude-relay/connection.json")), payload = {} } = {}) {
   const { token } = JSON.parse(fs.readFileSync(connectionFile, 'utf8'));

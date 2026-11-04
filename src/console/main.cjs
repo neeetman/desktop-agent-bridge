@@ -67,6 +67,35 @@ function checkedApp(v) {
   if (!["codex", "claude"].includes(v)) throw Error("Invalid desktop");
   return v;
 }
+function runCertification(app,threads,config) {
+  return run(config.node||"node",[path.join(root,"bin/desktop-agent-bridge.mjs"),"compat","certify","--app",app,"--claude-thread",threads.claude,"--codex-thread",threads.codex],undefined,600000);
+}
+const watchFile=path.join(root,"runtime/candidates/console-watch.json");
+async function watchSettings() {
+  const {readJson}=await import("../compat/compatibility.mjs");
+  return readJson(watchFile,{enabled:false,attempts:{}});
+}
+async function checkUnknown() {
+  if(updating)return;
+  updating=true;
+  try {
+    const prefs=await watchSettings();
+    if(!prefs.enabled)return;
+    const {unknownPair}=await import("../compat/canary-watch.mjs");
+    const pair=unknownPair((await cli("doctor")).apps);
+    if(!pair||prefs.attempts[pair.key])return;
+    const {atomicJson}=await import("../compat/compatibility.mjs");
+    const attempt={at:new Date().toISOString(),status:"验收中"};
+    prefs.attempts[pair.key]=attempt;prefs.latest=pair.key;
+    // Persist before the first native dispatch, including across console restarts.
+    atomicJson(watchFile,prefs);
+    try {
+      const result=await runCertification(pair.unknown[0],prefs.threads,await config());
+      attempt.status="验收通过，等待导入";attempt.packages=result.packages;
+    } catch(e){attempt.status="需要检查";attempt.error=e.message;}
+    atomicJson(watchFile,prefs);
+  } finally {updating=false;}
+}
 async function confirm(title, detail) {
   const result = await dialog.showMessageBox(window, {
     type: "question",
@@ -88,6 +117,10 @@ async function update(action, value, chosenProfile) {
     if (action === "probe") {
       const result = await cli("doctor", "--app", desktop, "--probe");
       return result.probe.ready ? "原生接口已就绪。" : "原生接口正在等待连接。";
+    }
+    if (action === "discover") {
+      const result = await cli("compat","discover","--app",desktop);
+      return "候选包已生成，尚待验收。 "+result.folder;
     }
     if (action === "local") {
       const choice = await dialog.showOpenDialog(window, {
@@ -230,6 +263,42 @@ if (!app.requestSingleInstanceLock()) {
         throw Error("Invalid profile ID");
       return update(action, desktop, id);
     });
+    bind("certify",async (app,codex,claude)=>{
+      checkedApp(app);
+      if(updating) throw Error("已有维护操作正在运行");
+      updating=true;
+      try {
+        const {checkThreads}=await import("../compat/certify.mjs");
+        checkThreads({codex,claude},[]);
+        if(!await confirm("向专用测试会话发送验收消息？","Codex "+codex+"\nClaude "+claude))return "";
+        const result=await runCertification(app,{claude,codex},await config());
+        if(!await confirm("验收通过，导入消息适配包？",result.profileId+"\n"+result.package))return "验收通过。适配包 "+result.package;
+        await cli("compat","import",result.package);
+        return "验收通过，已导入 "+result.profileId+"。报告 "+result.report;
+      } finally {updating=false;}
+    });
+    bind("canary-watch",async (enabled,threads)=>{
+      const prefs=await watchSettings();
+      if(enabled!==undefined){
+        if(updating||typeof enabled!=="boolean")throw Error("维护操作正在运行");
+        updating=true;
+        try {
+          if(enabled){
+            const {checkThreads}=await import("../compat/certify.mjs");
+            checkThreads(threads,[]);
+            if(!await confirm("自动验收未知构建？","控制台运行期间，新构建会向以下测试会话发送消息。\n"+threads.codex+"\n"+threads.claude))return prefs;
+            prefs.threads={codex:threads.codex,claude:threads.claude};
+          }
+          prefs.enabled=enabled;
+          const {atomicJson}=await import("../compat/compatibility.mjs");
+          atomicJson(watchFile,prefs);
+        } finally {updating=false;}
+      }
+      return prefs;
+    });
+    const watchTick=()=>checkUnknown().catch(e=>console.error("Automatic compatibility check:",e.message));
+    setInterval(watchTick,60000).unref();
+    void watchTick();
     bind("copy", (value) => {
       if (typeof value === "string" && value.length <= 1024)
         clipboard.writeText(value);

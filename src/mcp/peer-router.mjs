@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../core/contracts.mjs';
 import {publicResult,bridgeHeader,errorData} from '../core/collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
+import {canaryReceipt} from '../compat/canary-receipts.mjs';
 import {HealthMonitor} from './health-monitor.mjs';
 import {CallbackForwarder} from './callback-forwarder.mjs';
 
@@ -423,9 +424,11 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
     try {
       if (request.headers.origin || request.headers.authorization !== `Bearer ${router.state.token}`) throw bad(401, 'Local router authorization required');
       const url = new URL(request.url, 'http://localhost');
-      if (request.method === 'GET' && url.pathname === '/health') return reply(200, { ok: true, pid: process.pid, messages: Object.keys(router.state.messages).length });
+      if (request.method === 'GET' && url.pathname === '/health') return reply(200, { ok: true, canaryProtocol:1, pid: process.pid, messages: Object.keys(router.state.messages).length });
       if(request.method==='GET'&&url.pathname==='/v1/compatibility')return reply(200,await coordinator.doctor());
       let data = {}; if (request.method === 'POST') { let bytes = 0; const chunks = []; for await (const chunk of request) { bytes += chunk.length; if (bytes > 1024 * 1024) throw bad(413, 'Request too large'); chunks.push(chunk); } data = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+      const validation=canaryReceipt(router.directory,url.pathname,data);
+      if(validation) return reply(200,validation);
       switch (url.pathname) {
         case '/v1/send': { const message = await router.send(data); return reply(202, {...message, delivery:router.delivery(message)}); }
         case '/v1/reply': return reply(202, await router.reply(data));

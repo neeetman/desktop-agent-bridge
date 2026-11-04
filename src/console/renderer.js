@@ -222,7 +222,7 @@ function renderDesktops() {
         '</b></div><div><span>匹配配置</span><code>' + esc(row.profileId || row.code || '尚未匹配') +
         '</code></div></div><div class="worker-info">' + workerSummary(n) + '</div>' +
         '<div class="package-actions">' + button('probe','检查连接') + button('upstream','检查 GitHub') +
-        button('local','导入本机包') + '</div><div class="activation"><label for="profile-' + n +
+        button('local','导入本机包') + button('discover','生成候选') + '</div><div class="activation"><label for="profile-' + n +
         '">激活配置</label><div><select id="profile-' + n + '" data-app="' + n +
         '"><option value="">自动匹配</option>' + options + '</select>' + button('activate','空闲时激活',true) +
         '</div></div></article>';
@@ -484,6 +484,33 @@ $("refresh").onclick = () => {
   queue();
   desktops();
 };
+$("certify-form").onsubmit=async event=>{
+  event.preventDefault();
+  if(state.busy)return;
+  state.busy=true;
+  const form=event.currentTarget,button=form.querySelector("button");
+  button.disabled=true;
+  $("certify-result").textContent="正在检查原生接口并等待两端消费回执…";
+  try {
+    $("certify-result").textContent=await window.bridge.certify($("certify-app").value,$("certify-codex").value.trim(),$("certify-claude").value.trim());
+  } catch(e){$("certify-result").textContent=e.message;}
+  finally {button.disabled=false;state.busy=false;await desktops();}
+};
+async function watchStatus(change=false){
+  const toggle=$("canary-watch");
+  toggle.disabled=true;
+  try{
+    const prefs=await window.bridge.canaryWatch(change?toggle.checked:undefined,{codex:$("certify-codex").value.trim(),claude:$("certify-claude").value.trim()});
+    toggle.checked=prefs.enabled;
+    for(const name of ["codex","claude"])if(!change&&!$("certify-"+name).value)$("certify-"+name).value=prefs.threads?.[name]||"";
+    const last=prefs.attempts[prefs.latest];
+    $("canary-watch-status").textContent=last?[last.status,last.error,...Object.values(last.packages||{}).map(p=>p.folder)].filter(Boolean).join(" · "):"";
+  }catch(e){if(change)toggle.checked=!toggle.checked;$("canary-watch-status").textContent=e.message;}
+  finally{toggle.disabled=false;}
+}
+$("canary-watch").onchange=()=>watchStatus(true);
+void watchStatus();
+setInterval(()=>{if(!document.hidden&&!$("canary-watch").disabled)void watchStatus();},30000);
 renderDesktops();
 page("home");
 queue();

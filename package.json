@@ -16,6 +16,8 @@
     "source:refresh": "node scripts/dev/update-source-revisions.mjs"
   },
   "dependencies": {
+    "acorn": "8.15.0",
+    "acorn-walk": "8.3.4",
     "ws": "8.22.0"
   },
   "license": "MIT",

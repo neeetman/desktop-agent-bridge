@@ -16,6 +16,8 @@ export function compatError(code,message,extra={}){return Object.assign(new Erro
 export function adapterDigest(root,files){return digest(canonical(Object.fromEntries([...files].sort().map(file=>[file,digest(fs.readFileSync(safeFile(root,file)))]))));}
 function safeFile(root,name){if(typeof name!=='string'||path.isAbsolute(name)||name.includes('\\')||name.split('/').some(x=>['..','.',''].includes(x)))throw compatError('INVALID_PROFILE','Unsafe package path');const file=sourcePath(root,name);if(!file.startsWith(path.resolve(root)+path.sep))throw compatError('INVALID_PROFILE','Path escapes package');if(fs.existsSync(file)&&!fs.realpathSync(file).startsWith(fs.realpathSync(root)+path.sep))throw compatError('INVALID_PROFILE','Package symlink escapes its root');return file;}
 export function validateProfile(profile){
+  if(profile.evidence?.stage==='candidate')throw compatError('INVALID_PROFILE','Structural candidates require live validation before import');
+  if(profile.evidence?.stage==='messaging-verified' && (!Array.isArray(profile.capabilities)||profile.capabilities.length!==2||!['read','send'].every(cap=>profile.capabilities.includes(cap))))throw compatError('INVALID_PROFILE','Messaging evidence only covers read and send');
   if(profile.schemaVersion!==1||profile.coreApiVersion!==1||!['codex','claude'].includes(profile.app)||!/^[a-z0-9][a-z0-9._-]{0,95}$/.test(profile.id??'')||profile.platform!=='win32'||profile.arch!=='x64')throw compatError('INVALID_PROFILE','Unsupported profile identity or schema');
   if(!Array.isArray(profile.adapterFiles)||!profile.adapterFiles.length||!Array.isArray(profile.capabilities)||!profile.capabilities.length||!profile.manifests||!profile.evidence?.baseline)throw compatError('INVALID_PROFILE','Profile lacks adapter, capabilities, manifests or evidence');
   if(!/^[a-f0-9]{64}$/.test(profile.adapterDigest??''))throw compatError('INVALID_PROFILE','Invalid adapter digest');
@@ -67,7 +69,14 @@ export class Compatibility {
     const local=[...readJson(path.join(this.directory,'imports.json'),[]),...readJson(path.join(this.directory,'history.json'),[])];
     const result=[...catalog.profiles.map(file=>({profile:readJson(safeFile(this.root,file)),adapterRoot:this.root})),...local.map(item=>({profile:readJson(path.join(this.directory,'packages',item.digest,'profile.json')),adapterRoot:path.join(this.directory,'packages',item.digest,'adapter')}))];
     const ids=new Map();for(const row of result){validateProfile(row.profile);const id=row.profile.app+':'+row.profile.id,previous=ids.get(id);if(previous&&canonical({...previous.profile,revoked:false})!==canonical({...row.profile,revoked:false}))throw compatError('INVALID_PROFILE','A profile ID cannot be reused for different contents');if(previous?.profile.revoked||(catalog.revoked??[]).includes(id))row.profile={...row.profile,revoked:true};ids.set(id,row);}
-    return [...ids.values()];
+    const rows=[...ids.values()];
+    for(const row of rows){
+      if(row.profile.evidence.stage!=='messaging-verified')continue;
+      const seed=ids.get(row.profile.app+':'+row.profile.evidence.seed);
+      if(!seed||seed.profile.revoked||seed.profile.adapterDigest!==row.profile.adapterDigest)
+        row.profile={...row.profile,revoked:true};
+    }
+    return rows;
   }
   pin(selected){
     const hash=digest(canonical(selected.profile)),target=path.join(this.directory,'packages',hash),adapterRoot=path.join(target,'adapter');
