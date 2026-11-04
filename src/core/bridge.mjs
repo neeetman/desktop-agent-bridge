@@ -56,7 +56,13 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     // Do not publish a PID/address until the service has actually started.
     save();
     writeJson(path.join(stateDir, 'connection.json'), { token: state.token, initializing: true });
-    try { await preflight(); } catch (error) { tools.close(); throw error; }
+    try { await preflight(); }
+    catch (error) {
+      if (error.code !== 'BUILD_UNSUPPORTED') { tools.close(); throw error; }
+      // Keep local receipts and task lookup available across desktop updates.
+      // Native operations still check capabilities on every dispatch.
+      enableIpc = false;
+    }
   }
   state.provider = tools.provider ?? 'codex';
   for(const [key,record] of Object.entries(state.idempotency)){
@@ -368,6 +374,11 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
           emit('session.wake_requested', { threadId, taskId: task.id, status: task.status });
           return json(res, task.httpStatus??(['failed', 'unknown'].includes(task.status) ? 409 : 202), task);
         }
+      }
+      if (req.method === 'GET' && url.pathname === '/v1/dispatch-record') {
+        const key = url.searchParams.get('key');
+        const task = state.tasks[state.idempotency[key]?.taskId];
+        return json(res, 200, {taskId:task?.id ?? null, status:task?.status ?? null});
       }
       if (req.method === 'GET' && url.pathname === '/v1/tasks') return json(res, 200, { tasks: Object.values(state.tasks) });
       const taskRoute = url.pathname.match(/^\/v1\/tasks\/([^/]+)$/);

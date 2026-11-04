@@ -17,7 +17,11 @@ export async function main(args){
  try{
   let result;const app=option(args,'--app');
   if(app&&!['codex','claude'].includes(app))throw compatError('INVALID_ARGUMENT','--app must be codex or claude');
-  if(args[0]==='doctor'){
+  if(args[0]==='console'){
+   const child=spawn('python',[sourcePath(ROOT,'bridge_console.py')],{stdio:'inherit',windowsHide:true});
+   process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
+   return;
+  }else if(args[0]==='doctor'){
    result=await coordinator.doctor(app);
    if(args.includes('--probe')){if(!app)throw compatError('INVALID_ARGUMENT','--probe requires --app');const selected=await coordinator.resolve(app,app==='codex'?'execution':'read');result.probe=await helperStatus(selected,app==='codex'?'execution':'claude');result.passive=false;}
   }else if(args[0]==='compat'){
@@ -36,7 +40,7 @@ export async function main(args){
   }else if(args[0]==='install'){
    if(process.platform!=='win32')throw compatError('UNSUPPORTED_PLATFORM','Desktop installation requires Windows');
    const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',sourcePath(ROOT,'install.ps1'),...args.slice(1)],{stdio:'inherit',windowsHide:true});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});return;
-  }else result={name:'@neeetman/desktop-agent-bridge',commands:['doctor [--app codex|claude] [--probe]','compat list','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>']};
+  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude] [--probe]','compat list','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>']};
   console.log(JSON.stringify(result,null,2));
  }catch(error){console.error(JSON.stringify({error:error.message,code:error.code??'BRIDGE_ERROR',dispatchNotStarted:error.dispatchNotStarted??false}));process.exitCode=1;}
 }

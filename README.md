@@ -1,5 +1,7 @@
 # Desktop Agent Bridge
 
+Run `desktop-agent-bridge console` (from a checkout, `node bin/desktop-agent-bridge.mjs console`) to monitor delivery, search by caller or router message ID, inspect the matching desktop profile, check GitHub for an exact build match or import a trusted local adapter package, and activate it when idle. The console uses Python with Tk. New builds require a validated matching profile.
+
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 An open-source, local session bridge for **Codex Desktop, Claude Code in Claude Desktop, and DeepSeek Harness on Windows**. Desktop agents can send messages, receive replies, request decisions, and wake the original session through MCP.

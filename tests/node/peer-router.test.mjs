@@ -112,7 +112,8 @@ test('same acknowledged turn explicit send suppresses automatic final forwarding
       f.setTask('running');const m=await f.router.send({from,to,text:'task'});await f.tick();
       f.setBusy(true);f.setTurn('turn-A');await f.router.acknowledge({from:to,messageId:m.id});f.setTurn(sameTurn?'turn-A':'turn-B');
       const outbound=await f.router.send({from:to,to:from,text:'explicit send',expectReply:false});
-      assert.equal(m.autoReplySuppressedBy,sameTurn?outbound.id:undefined);
+      await new Promise(resolve=>setImmediate(resolve)); // turn correlation runs after durable acceptance
+    assert.equal(m.autoReplySuppressedBy,sameTurn?outbound.id:undefined);
       f.setBusy(false);f.setTask('completed');await f.tick();
       assert.equal(Boolean(m.replyMessageId),false);
       assert.equal(m.status,sameTurn?'completed':'awaiting_ack');

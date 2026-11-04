@@ -32,7 +32,7 @@ export async function callPeerTool(name, args, { request, self, identity }) {
       const from = await self(args); return request('/v1/answer-decision', { from, decisionId: args.decisionId, answer: args.answer, context: args.context });
     }
     case 'bridge_decisions': return request('/v1/decisions', { who: await self(args), status: args.status ?? 'pending' });
-    case 'bridge_message': return request('/v1/message', { id: args.messageId });
+    case 'bridge_message': return request('/v1/message', { id: args.messageId, from:await self(args) });
     default: throw new Error('Unknown desktop-bridge tool');
   }
 }

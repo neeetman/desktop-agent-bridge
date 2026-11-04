@@ -58,7 +58,7 @@ const server = http.createServer(async (req, res) => {
     const operation = queue.then(() => nativeCall(request));
     queue = operation.catch(() => {});
     reply(200, { result: await operation });
-  } catch (error) { reply(502, { error: error.message }); }
+  } catch (error) { reply(error.status ?? 502, { error: error.message, code:error.code, dispatchNotStarted:error.dispatchNotStarted }); }
 });
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(43128, '127.0.0.1', resolve); });
 fs.writeFileSync(credentialsFile, JSON.stringify({ baseUrl: 'http://127.0.0.1:43128', token, pid: process.pid }, null, 2), { mode: 0o600 });

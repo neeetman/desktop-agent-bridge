@@ -12,7 +12,7 @@ export class ClaudeNative {
     const connection = JSON.parse(fs.readFileSync(this.connectionFile, 'utf8'));
     const response = await fetch(`${connection.baseUrl}/rpc`, { method: 'POST', headers: { Authorization: `Bearer ${connection.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ method, args }), signal: AbortSignal.timeout(65000) });
     const body = await response.json();
-    if (!response.ok || body.error) throw new Error(body.error ?? `Native relay HTTP ${response.status}`);
+    if (!response.ok || body.error) throw Object.assign(new Error(body.error ?? `Native relay HTTP ${response.status}`), {status:response.status, code:body.code, dispatchNotStarted:body.dispatchNotStarted});
     return body.result;
   }
 }

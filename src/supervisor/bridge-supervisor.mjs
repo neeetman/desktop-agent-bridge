@@ -119,7 +119,7 @@ export class Supervisor {
     service.state='waiting';if(Date.now()<service.nextStart)return;
     if(service.app&&!this.apps.get(service.app)?.pid)return;
     if(service.name==='claude'){
-      try{if(!(await request(sourcePath(ROOT,'runtime/claude-relay/connection.json'))).connected){service.state='waiting_for_native';return;}}
+      try{if(!(await request(sourcePath(ROOT,'runtime/claude-relay/connection.json'))).ok){service.state='waiting_for_native';return;}}
       catch{service.state='waiting_for_native';return;}
     }
     let args=[sourcePath(ROOT,service.script)];
