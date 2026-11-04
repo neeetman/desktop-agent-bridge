@@ -1,6 +1,6 @@
 # 会话协作 MCP
 
-Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 Host 中的 `deepseek-plugin.mjs`。当前共用工具目录有 **20 个工具**，已启动的旧 MCP worker 可能仍保留旧目录。
+Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 Host 中的 `deepseek-plugin.mjs`。当前共用工具目录有 **21 个工具**，已启动的旧 MCP worker 可能仍保留旧目录。
 
 ## 路由和回复
 
@@ -76,3 +76,5 @@ if the router exits after queueing it. A first deployment skips old history;
 operators may select exact pending event IDs for recovery rather than replaying
 the backlog. Existing task origins can be recovered only when the original
 creation header and idempotency record agree.
+
+`bridge_outbox({limit:20,stage:"waiting_for_adapter"})` 查询当前会话的发件回执，按新到旧排列，可将 nextCursor 作为下次的 after。发送重要指令时提供稳定的 messageId。若发送返回 SEND_RECEIPT_UNCONFIRMED，用 lookupMessageId 在原会话调用 bridge_message 核实，再决定是否按原 ID 和原参数重试。bridge_self 的 worker.status 比较运行中的代码和已安装代码；旧 worker 的状态也可在控制台适配管理页查看。

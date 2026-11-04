@@ -19,7 +19,20 @@ export async function callPeerTool(name, args, { request, self, identity }) {
       const input=Object.fromEntries(['prompt','title','projectId','cwd','model','effort','taskVersion','writableRoots','sandboxMode','approvalPolicy'].filter(key=>args[key]!==undefined).map(key=>[key,args[key]]));
       return request('/v1/create-task',{from:await self(args),app:args.toApp,input,idempotencyKey:args.idempotencyKey});
     }
-    case 'bridge_send': return request('/v1/send', { from: await self(args), to: { app: args.toApp, threadId: args.toThreadId }, text: args.text, expectReply: args.expectReply, messageId: args.messageId ?? crypto.randomUUID(),taskVersion:args.taskVersion });
+    case 'bridge_send': {
+      const from = await self(args);
+      const messageId = args.messageId ?? crypto.randomUUID();
+      try {
+        return await request('/v1/send', {from, to:{app:args.toApp,threadId:args.toThreadId},
+          text:args.text, expectReply:args.expectReply, messageId, taskVersion:args.taskVersion});
+      } catch(error) {
+        if (error.status || !(['TimeoutError','AbortError'].includes(error.name) ||
+            error.code === 23 || (error instanceof TypeError && /fetch failed/i.test(error.message)))) throw error;
+        throw Object.assign(new Error(`Router acceptance unconfirmed. In this chat query bridge_message with messageId=${messageId}. Reuse this ID and identical input if retrying.`),
+          {code:'SEND_RECEIPT_UNCONFIRMED', lookupMessageId:messageId});
+      }
+    }
+    case 'bridge_outbox': return request('/v1/outbox', {from:await self(args), after:args.after, limit:args.limit, stage:args.stage});
     case 'bridge_reply': {
       const { message } = await request('/v1/message', { id: args.messageId });
       return request('/v1/reply', { from: await self(args, message), messageId: args.messageId, text: args.text });

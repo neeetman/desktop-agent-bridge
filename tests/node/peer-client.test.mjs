@@ -18,7 +18,7 @@ test('MCP metadata identifies the current chat and cannot be overridden by a dif
   const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
   assert.equal(code, 0);
   const results = output.trim().split('\n').map(JSON.parse);
-  assert.equal(results.find(x=>x.id===2).result.tools.length, 20);
+  assert.equal(results.find(x=>x.id===2).result.tools.length, 21);
   const tools=results.find(x=>x.id===2).result.tools;assert.ok(tools.find(t=>t.name==='bridge_create_task').inputSchema.properties.sandboxMode.enum.includes('danger-full-access'));assert.ok(tools.some(t=>t.name==='bridge_set_permissions'));
   const identity = JSON.parse(results.find(x=>x.id===3).result.content[0].text);
   assert.equal(identity.threadId, 'current-chat'); assert.equal(identity.app, 'codex');

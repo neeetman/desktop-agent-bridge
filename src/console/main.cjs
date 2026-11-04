@@ -178,6 +178,19 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
   app.whenReady().then(async () => {
+    bind("login-startup", enabled => {
+      if (process.platform !== "win32") throw Error("Windows login startup requires Windows");
+      const options = {path:process.execPath, args:[__filename]};
+      const name = "DesktopAgentBridgeConsole";
+      if (enabled !== undefined) {
+        if (typeof enabled !== "boolean") throw Error("Invalid startup setting");
+        app.setLoginItemSettings({...options, name, openAtLogin:enabled, enabled});
+      }
+      return app.getLoginItemSettings(options).launchItems.some(item =>
+        item.scope === "user" && item.name === name && item.enabled &&
+        path.resolve(item.path).toLowerCase() === process.execPath.toLowerCase() &&
+        item.args.length === 1 && path.resolve(item.args[0]).toLowerCase() === __filename.toLowerCase());
+    });
     bind("queue", async () => {
       const queue = await local("runtime/router/connection.json", "/v1/queue");
       const reviews = await read("runtime/console-reviews.json").catch(error => {
@@ -199,6 +212,12 @@ if (!app.requestSingleInstanceLock()) {
       ]);
       return {
         apps: result.apps,
+        workers: result.workers.filter(worker => worker.alive).map(worker => ({
+          app:worker.app, pid:worker.pid, threadId:worker.threadId, revision:worker.clientRevision
+        })),
+        installedRevision: createHash('sha256').update(Buffer.concat(await Promise.all(
+          ['peer-client.mjs','peer-catalog.mjs','peer-call.mjs'].map(file => fs.readFile(path.join(root,'src/mcp',file)))
+        ))).digest('hex').slice(0,16),
         deepseek: !!deepseek?.ok,
         profiles: profiles.profiles
           .filter((p) => !p.revoked)

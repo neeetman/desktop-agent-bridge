@@ -136,6 +136,23 @@ export class PeerRouter {
     this.state.jobs[message.id] = {id:message.id, status:'queued'};
   }
 
+  outbox({from, after, stage, limit = 20}) {
+    const who = address(from);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) throw bad(400, 'limit must be 1-50');
+    const sent = Object.values(this.state.messages).filter(message => equal(message.from, who)).reverse();
+    const cursor = after === undefined ? -1 : sent.findIndex(message => message.id === after);
+    if (after !== undefined && cursor === -1) throw bad(400, 'Unknown outbox cursor');
+    const receipts = [];
+    for (const message of sent.slice(cursor + 1)) {
+      const receipt = this.delivery(message);
+      if (!stage || stage === receipt.stage) receipts.push(receipt);
+      if (receipts.length > limit) break;
+    }
+    const hasMore = receipts.length > limit;
+    if (hasMore) receipts.pop();
+    return {receipts, nextCursor:hasMore ? receipts.at(-1).id : null};
+  }
+
   delivery(message) {
     const job = this.state.jobs[message.id];
     const stage = message.replyMessageId ? 'replied' : message.consumption?.acknowledgedAt ? 'acknowledged'
@@ -438,6 +455,7 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         case '/v1/receive': return reply(200, router.receive(data.who, data.after,data.includeArchived,data.summaryOnly));
         case '/v1/archive-messages':return reply(200,router.archiveMessages(data));
         case '/v1/decisions': return reply(200, { decisions: Object.values(router.state.decisions).filter(row => equal(row.to, address(data.who)) && (!data.status || row.status === data.status)) });
+        case '/v1/outbox': return reply(200, router.outbox(data));
         case '/v1/queue': return reply(200,{messages:Object.values(router.state.messages).map(m=>router.delivery(m)).reverse()});
         case '/v1/message': { const alias=data.from && router.state.keys[`${address(data.from).app}:${data.from.threadId}:${data.id}`]; const message = router.state.messages[alias?.id ?? data.id]; if (!message) throw bad(404, 'Message not found'); return reply(200, { message, job: router.state.jobs[message.id], delivery:router.delivery(message) }); }
         case '/v1/native': { if (!['codex', 'claude', 'deepseek'].includes(data.app) || !/^\/v1\/(threads|projects|models|capabilities|tasks)(?:[/?]|$)/.test(data.route) || (data.method && data.method !== 'GET')) throw bad(400, 'Read-only native route required'); return reply(200, await router.backendRequest(data.app, data.route)); }

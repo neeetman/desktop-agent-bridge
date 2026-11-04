@@ -9,7 +9,8 @@ import { lifecycle } from '../adapters/claude/claude-lifecycle.mjs';
 import { spawn } from 'node:child_process';
 import {publicResult,errorData} from '../core/collaboration.mjs';
 const toolCatalogDigest=crypto.createHash('sha256').update(JSON.stringify(tools)).digest('hex');
-const clientRevision=crypto.createHash('sha256').update(Buffer.concat(['peer-client.mjs','peer-catalog.mjs','peer-call.mjs'].map(name=>fs.readFileSync(projectURL(name))))).digest('hex').slice(0,16);
+const installedRevision=()=>crypto.createHash('sha256').update(Buffer.concat(['peer-client.mjs','peer-catalog.mjs','peer-call.mjs'].map(name=>fs.readFileSync(projectURL(name))))).digest('hex').slice(0,16);
+const clientRevision=installedRevision();
 function workerRecord(event,identity={}){const directory=fileURLToPath(projectURL("runtime/router/mcp-workers/"));fs.mkdirSync(directory,{recursive:true});fs.writeFileSync(directory+process.pid+'.json',JSON.stringify({pid:process.pid,app,at:new Date().toISOString(),event,toolCatalogDigest,clientRevision,configuredRevision:process.env.DESKTOP_BRIDGE_CLIENT_REVISION??null,...identity}));}
 
 const connectionFile = fileURLToPath(projectURL("runtime/router/connection.json"));
@@ -67,7 +68,11 @@ async function identity(args, meta, related) {
 async function self(args, meta, related) { const who = await identity(args, meta, related); if (who.needsThreadId) throw new Error('Cannot safely identify this GUI chat. Supply fromThreadId using its exact current thread ID; do not use a recent-chat guess.'); return { app: who.app, threadId: who.threadId }; }
 async function call(name, args, meta) {
   const result=await callPeerTool(name, args, { request, self: (args, related) => self(args, meta, related), identity: args => identity(args, meta) });
-  if(name==='bridge_self'){workerRecord('identity',{threadId:result.threadId??null});return {...result,worker:{toolCatalogDigest,clientRevision,version:'0.8.4'}};}return result;
+  if(name==='bridge_self'){workerRecord('identity',{threadId:result.threadId??null});const installed=installedRevision();
+    const current = installed === clientRevision;
+    return {...result, worker:{toolCatalogDigest, clientRevision, installedRevision:installed,
+      status:current?'current':'reload_recommended', toolCount:tools.length, version:'0.8.4',
+      ...(current?{}:{reloadHint:app==='claude'?'Reconnect desktop-bridge for this idle Claude session.':'Use a new worker or reload during an idle, unprotected maintenance window.'})}};}return result;
 }
 
 const send = message => process.stdout.write(JSON.stringify(message) + '\n');

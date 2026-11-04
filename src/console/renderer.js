@@ -1,5 +1,19 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+const loginStartup = $("login-startup");
+async function syncLoginStartup(requested) {
+  loginStartup.disabled = true;
+  try {
+    const actual = await window.bridge.loginStartup(requested);
+    loginStartup.checked = actual;
+    $("startup-note").textContent = actual ? "　已启用" : "　已关闭";
+    if (requested !== undefined && requested !== actual) throw Error("Windows 启动项状态未生效");
+  } catch (error) {
+    $("startup-note").textContent = error.message;
+  } finally { loginStartup.disabled = false; }
+}
+loginStartup.onchange = () => syncLoginStartup(loginStartup.checked);
+syncLoginStartup();
 const maximize = document.querySelector('[data-window="toggleMaximize"]');
 function syncWindowState(flag) {
   maximize.classList.toggle("is-maximized", flag);
@@ -150,6 +164,18 @@ function version(row) {
     row?.runningBuild?.packageVersion || row?.installedBuild?.version || "—"
   );
 }
+function workerSummary(app) {
+  const workers = (state.workers || []).filter(worker => worker.app === app);
+  if (!workers.length) return '<p class="meta">尚无运行中的 MCP worker 记录</p>';
+  const rows = workers.map(worker => {
+    const status = !worker.revision ? '版本未知' : worker.revision === state.installedRevision ? '当前版本' : '建议重载';
+    return '<li>' + esc(worker.threadId || '进程 ' + worker.pid) + ' · ' + status + '</li>';
+  });
+  const stale = workers.filter(worker => worker.revision && worker.revision !== state.installedRevision).length;
+  const hint = app === 'claude' ? '空闲时可重连指定会话。' : '在空闲且无受保护会话时全局重载。';
+  return '<details><summary>MCP 进程 · ' + workers.length + ' 个，' + stale +
+    ' 个建议重载</summary><ul>' + rows.join('') + '</ul><p>' + hint + '</p></details>';
+}
 function renderDesktops() {
   $("endpoints").innerHTML = names
     .map(
@@ -194,7 +220,7 @@ function renderDesktops() {
         esc(version(row)) +
         '</b></div><div><label>匹配的配置</label><span class="meta">' +
         esc(row.profileId || row.code || "尚未匹配") +
-        '</span></div></div><div class="buttons"><select data-app="' +
+        '</span></div></div>' + workerSummary(n) + '<div class="buttons"><select data-app="' +
         n +
         '" aria-label="候选适配包"><option value="">自动匹配</option>' +
         profiles
