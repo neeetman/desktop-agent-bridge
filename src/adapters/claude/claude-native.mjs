@@ -22,7 +22,10 @@ export function claudeTurns(messages, session) {
   for (const row of messages) {
     const content = row.message?.content;
     const userText = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(x => x.type === 'text').map(x => x.text).join('\n') : '';
-    if (row.type === 'user' && userText && !row.isMeta && !(Array.isArray(content)&&content.some(item=>item.type==='tool_result'))) {
+    // CLI-local commands are logged as user rows, but do not start model turns.
+    // They can arrive after a dispatch baseline when the transcript is flushed.
+    const localCommand = /^\s*<(?:command-name|local-command-(?:stdout|stderr|caveat))>/.test(userText);
+    if (row.type === 'user' && userText && !row.isMeta && !localCommand && !(Array.isArray(content)&&content.some(item=>item.type==='tool_result'))) {
       if(current?.status==='inProgress'){
         if(current.items.some(item=>item.phase==='final_answer')){
           current.status='completed';current.completedAt=current.finalMessageAt;current.completionEvidence='native-final-message-before-next-user';

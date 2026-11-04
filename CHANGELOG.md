@@ -21,6 +21,7 @@
 
 ## Unreleased
 
+- Exclude Claude CLI-local command records from model turns so delayed `/model` transcript entries cannot misidentify an accepted message as interrupted.
 - Rehash native files after ctime-only metadata updates and preserve the live helper binding when every byte still matches; file replacements and changed content still require restart.
 - Support the verified Codex 26.1027.6604.0 Windows package, including its renamed bootstrap chunk and conversation manager.
 - Normalize desktop executable basename casing across Win32 and CIM inventory so one running process retains its helper binding.

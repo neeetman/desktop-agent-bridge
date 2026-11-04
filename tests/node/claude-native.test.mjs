@@ -18,6 +18,24 @@ test('Claude transcripts distinguish tool results, assistant progress, final ans
   assert.equal(turns[1].status, 'failed');
 });
 
+test('CLI-local model commands cannot create or interrupt tracked model turns', () => {
+  const turns = claudeTurns([
+    {type:'user',uuid:'local-name',message:{content:'<command-name>/model</command-name>\n<command-args>test</command-args>'}},
+    {type:'user',uuid:'local-output',message:{content:'<local-command-stdout>Set model to test</local-command-stdout>'}},
+    {type:'user',uuid:'actual',message:{content:'[bridge] actual request'}},
+    {type:'assistant',message:{content:[{type:'text',text:'progress'}],stop_reason:'tool_use'}},
+    {type:'user',uuid:'late-command',message:{content:[{type:'text',text:'<command-name>/model</command-name>'}]}},
+    {type:'user',uuid:'late-error',message:{content:'<local-command-stderr>local output</local-command-stderr>'}},
+    {type:'assistant',message:{content:[{type:'text',text:'done'}],stop_reason:'end_turn'}},
+    {type:'user',uuid:'next',message:{content:'next request'}},
+  ], {turnRunning:true});
+  assert.deepEqual(turns.map(t=>t.id), ['actual','next']);
+  assert.equal(turns[0].status,'completed');
+  assert.equal(turns[0].supersededByTurnId,undefined);
+  assert.deepEqual(turns[0].items.map(t=>t.text),['progress','done']);
+  assert.equal(turns[1].status,'inProgress');
+});
+
 test('Claude effort setter returns void: verify metadata before sending and reject mismatches', async () => {
   const tools = new ClaudeTools(); const calls = [];
   tools.native = { async request(method, args) { calls.push([method, args]); if (method === 'getSession') return { effort: 'low' }; } };
