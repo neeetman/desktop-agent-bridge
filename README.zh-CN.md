@@ -1,6 +1,6 @@
 # Desktop Agent Bridge
 
-运行 `desktop-agent-bridge console`（源码安装使用 `node bin/desktop-agent-bridge.mjs console`）打开本机控制台。可按消息 ID、会话或状态筛选队列，检查匹配的桌面适配配置、从 GitHub 查找匹配当前构建的适配包或导入可信本地包，并在空闲时激活。控制台需要带 Tk 的 Python。未知构建需要经过验证的匹配配置。
+运行 `desktop-agent-bridge console`（源码安装使用 `node bin/desktop-agent-bridge.mjs console`）打开本机控制台。可按消息 ID、会话或状态筛选队列，检查匹配的桌面适配配置、从 GitHub 查找匹配当前构建的适配包或导入可信本地包，并在空闲时激活。控制台采用 Electron，提供桌面连接图、可筛选的消息队列和逐条投递时间线。安装时请保留 npm 可选依赖。未知构建需要经过验证的匹配配置。
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 

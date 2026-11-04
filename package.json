@@ -52,5 +52,8 @@
     "CHANGELOG.md",
     "requirements.txt",
     "CONTRIBUTING.md"
-  ]
+  ],
+  "optionalDependencies": {
+    "electron": "45.2.2"
+  }
 }

@@ -18,7 +18,10 @@ export async function main(args){
   let result;const app=option(args,'--app');
   if(app&&!['codex','claude'].includes(app))throw compatError('INVALID_ARGUMENT','--app must be codex or claude');
   if(args[0]==='console'){
-   const child=spawn('python',[sourcePath(ROOT,'bridge_console.py')],{stdio:'inherit',windowsHide:true});
+   const {default:electron}=await import('electron').catch(()=>{throw Error('Install the optional Electron dependency to open the console.');});
+   const env={...process.env, DESKTOP_BRIDGE_NODE:process.execPath};
+   delete env.ELECTRON_RUN_AS_NODE;
+   const child=spawn(electron,[path.join(ROOT,'src','console','main.cjs')],{stdio:'inherit',env,windowsHide:true});
    process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
    return;
   }else if(args[0]==='doctor'){

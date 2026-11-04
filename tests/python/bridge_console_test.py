@@ -2,7 +2,7 @@ import io
 import json
 import unittest
 from unittest.mock import patch
-from bridge_console import upstream_profile
+from console_upstream import upstream_profile
 
 
 class ConsoleUpdateTests(unittest.TestCase):

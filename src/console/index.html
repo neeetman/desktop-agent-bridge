@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'"
+    />
+    <title>Desktop Agent Bridge</title>
+    <link rel="stylesheet" href="console.css" />
+  </head>
+  <body>
+    <aside>
+      <div class="brand">
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+          <rect width="40" height="40" rx="12" fill="#83ecdb" />
+          <path
+            d="M10 28V14h10a5 5 0 0 0 5-5M16 30v-9h10a4 4 0 0 0 4-4"
+            stroke="#173c50"
+            stroke-width="3.4"
+            fill="none"
+            stroke-linecap="round"
+          />
+        </svg>
+        <div><b>Bridge</b><small>DESKTOP CONSOLE</small></div>
+      </div>
+      <div class="nav-label">工作空间</div>
+      <nav>
+        <button data-page="home" class="nav active">
+          <i data-icon="overview"></i>通信总览
+        </button>
+        <button data-page="queue" class="nav">
+          <i data-icon="messages"></i>消息队列
+        </button>
+        <button data-page="adapters" class="nav">
+          <i data-icon="sliders"></i>适配管理
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="machine"><i data-icon="monitor"></i></span>
+        <div>本机工作区<small>Windows · Local</small></div>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <span id="crumb">工作空间　/　通信总览</span
+        ><span class="live" id="network">正在连接</span>
+      </header>
+      <section class="content">
+        <div class="title-line">
+          <div>
+            <div class="eyebrow" id="eyebrow">OVERVIEW</div>
+            <h1 id="heading">通信总览</h1>
+          </div>
+          <button class="quiet" id="refresh">
+            <i data-icon="refresh"></i>刷新
+          </button>
+        </div>
+        <div id="alert" role="status" hidden></div>
+        <section id="overview">
+          <div class="topology">
+            <div class="topo-info">
+              <small>CONNECTION MAP</small>
+              <h2>桌面连接</h2>
+              <p>本机路由与桌面端的连接状态</p>
+              <div class="router">
+                <span class="dot"></span><b>Peer Router</b
+                ><span id="router-state">连接中</span>
+              </div>
+            </div>
+            <div class="wiring">
+              <svg
+                viewBox="0 0 120 156"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M1 78 H35 Q51 78 57 60 L64 40 Q69 24 86 24 H119 M1 78 H119 M1 78 H35 Q51 78 57 96 L64 116 Q69 132 86 132 H119"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.7"
+                />
+                <circle cx="5" cy="78" r="4" fill="#88e6d9" />
+              </svg>
+            </div>
+            <div class="endpoints" id="endpoints"></div>
+          </div>
+        </section>
+        <div id="messages">
+          <div class="stats" id="stats"></div>
+          <div class="section-line">
+            <div>
+              <div class="eyebrow">MESSAGE STREAM</div>
+              <h2 id="table-heading">最近消息</h2>
+            </div>
+            <button class="text-action" id="see-all">全部消息　→</button>
+          </div>
+          <div class="table-shell">
+            <div class="tools">
+              <label class="search"
+                ><i data-icon="search"></i
+                ><input
+                  id="search"
+                  placeholder="搜索消息 ID、会话或应用"
+                  aria-label="搜索消息" /></label
+              ><select id="filter" aria-label="筛选投递状态">
+                <option value="">所有状态</option>
+                <option value="pending">待处理</option>
+                <option value="delivered">已投递</option>
+                <option value="read">已确认 / 已回复</option>
+                <option value="issue">需检查</option>
+              </select>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>消息</th>
+                  <th>传送方向</th>
+                  <th>回执</th>
+                  <th>入队时间</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="rows"></tbody>
+            </table>
+            <div class="pager">
+              <span id="range"></span>
+              <div>
+                <button id="prev" aria-label="上一页">‹</button
+                ><button id="next" aria-label="下一页">›</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <section id="adapters" hidden>
+          <div class="section-line"><h2>桌面适配包</h2></div>
+          <div id="packages"></div>
+          <div class="result" id="result" role="status" hidden></div>
+        </section>
+      </section>
+    </main>
+    <dialog id="detail">
+      <div class="detail-head">
+        <div class="eyebrow">DELIVERY RECEIPT</div>
+        <button id="close" aria-label="关闭">×</button>
+      </div>
+      <div id="detail-body"></div>
+    </dialog>
+    <script src="renderer.js"></script>
+  </body>
+</html>

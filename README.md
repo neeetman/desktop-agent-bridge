@@ -1,6 +1,6 @@
 # Desktop Agent Bridge
 
-Run `desktop-agent-bridge console` (from a checkout, `node bin/desktop-agent-bridge.mjs console`) to monitor delivery, search by caller or router message ID, inspect the matching desktop profile, check GitHub for an exact build match or import a trusted local adapter package, and activate it when idle. The console uses Python with Tk. New builds require a validated matching profile.
+Run `desktop-agent-bridge console` (from a checkout, `node bin/desktop-agent-bridge.mjs console`) to monitor delivery, search by caller or router message ID, inspect the matching desktop profile, check GitHub for an exact build match or import a trusted local adapter package, and activate it when idle. The Electron console includes a connection map, a searchable queue and individual delivery timelines. Install optional npm dependencies to run it. New builds require a validated matching profile.
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
