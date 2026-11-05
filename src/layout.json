@@ -30,6 +30,7 @@
     "peer-client.mjs": "src/mcp/peer-client.mjs",
     "peer-router.mjs": "src/mcp/peer-router.mjs",
     "callback-forwarder.mjs": "src/mcp/callback-forwarder.mjs",
+    "script-callers.mjs": "src/mcp/script-callers.mjs",
     "compat-helper-status.mjs": "src/compat/compat-helper-status.mjs",
     "compat-service.mjs": "src/compat/compat-service.mjs",
     "compatibility.mjs": "src/compat/compatibility.mjs",

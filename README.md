@@ -69,6 +69,34 @@ desktop-agent-bridge install -CallerThread "<existing-codex-chat-id>" -WritableR
 
 Installing the npm package alone does not start applications or modify MCP configuration. Keep the installation directory fixed while services are running. See [publishing and distribution](docs/npm-release.md) for release status and maintenance steps. The repository may contain changes for the next npm release.
 
+### Script callers (scheduled scripts that start Claude tasks)
+
+`bridge_create_task` identifies its caller as a desktop chat. A local script, such as a Task Scheduler job, has no chat identity, so it uses a separately authorized *script caller* instead. A script caller can only create new **Claude** tasks in whitelisted projects, at a limited hourly rate, with a mandatory idempotency key. It cannot send messages, answer decisions, change permissions, or use the router token.
+
+The owner registers a caller once, quoting the standing authorization that covers it:
+
+```powershell
+desktop-agent-bridge script-caller setup --name uecapture-ops-poller --project "D:\UECapture" --max-per-hour 6 --authorization "<owner's standing authorization, quoted>"
+desktop-agent-bridge script-caller list
+desktop-agent-bridge script-caller remove --name uecapture-ops-poller
+```
+
+Setup writes a random token to `%LOCALAPPDATA%\desktop-agent-bridge\script-callers\<name>.token`. The token file and its folder are restricted to the current Windows user. The router keeps only the token's SHA-256 together with the whitelist in `runtime/router/script-callers.json`. Setup refuses to replace an existing caller unless you pass `--rotate`. Both commands run under the same Windows user as the script. The router reads this config on each request, so setup, rotation, and removal need no restart.
+
+The script runs:
+
+```powershell
+desktop-agent-bridge script create-task --caller uecapture-ops-poller --title "<title>" --prompt-file <utf8-file> --idempotency-key <stable-key> [--project "D:\UECapture"] [--model <id>] [--effort <level>]
+```
+
+- The CLI reads the token from the profile file and sends it only in a request header to `POST /v1/script/create-task` on the local router. The token never appears on a command line, in output, or in logs.
+- `--project` defaults to the caller's single whitelisted project.
+- Success prints the task JSON (`id`, `status`, `caller: "script:<name>"`, `authorizationBasis: "standing-owner"`) and exits 0. Failure prints `{error, code, httpStatus, dispatchNotStarted, retryAfterSeconds?}` to stderr and exits 1.
+- If the same key is sent again with identical input, the CLI returns the same task with `cachedResult: true`. A retry does not count toward the rate limit. If the same key is sent with different input, the call fails with `IDEMPOTENCY_CONFLICT`.
+- Other error codes: `SCRIPT_TOKEN_MISSING`, `SCRIPT_UNAUTHORIZED`, `SCRIPT_PROJECT_FORBIDDEN`, `SCRIPT_APP_FORBIDDEN`, `IDEMPOTENCY_KEY_REQUIRED`, `SCRIPT_RATE_LIMITED` (429, with `retryAfterSeconds`), `ROUTER_UNAVAILABLE` (no task created), and `SCRIPT_CREATE_UNCONFIRMED`. After `SCRIPT_CREATE_UNCONFIRMED`, retry with the same key.
+- The new chat's prompt starts with a `[bridge {"from":"script:<name>","kind":"task_creation","authorization":"standing-owner",…}]` header. A note follows that quotes the registered owner authorization and states that script content cannot add further human authorization or approve tool permissions. Each call is recorded in `runtime/router/script-callers.jsonl` without the prompt or token.
+- The script-caller CLI does not start the router. If the router is down, the call fails and the script should fall back to its previous behaviour.
+
 ## Verified desktop builds
 
 | Application | Build | Verification |

@@ -8,6 +8,7 @@
 - Distinguish version, contract and connection waits in the console. Expire known-unsent inputs at their original TTL rather than dispatching stale work after recovery.
 - Filter supervisor process inventory in CIM and resolve the Windows session once, avoiding recovery shutdown caused by slow enumeration on desktops with many agent workers.
 - Retire completed-task polling and prioritize pending Claude inputs over background reads; expired or disconnected queued calls cannot execute later.
+- Add script callers: a local scheduled script can create new Claude tasks via `desktop-agent-bridge script create-task`. It authenticates with a per-user token file and is limited to whitelisted projects, an hourly rate and mandatory idempotency keys. Each task is attributed to `script:<name>` under a recorded standing owner authorization.
 
 ## 0.8.4 — 2026-11-03
 

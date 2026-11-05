@@ -5,7 +5,26 @@ import {spawn} from 'node:child_process';
 import path from 'node:path';
 import {codexMcp} from '../adapters/codex/codex-mcp-control.mjs';
 import {lifecycle} from '../adapters/claude/claude-lifecycle.mjs';
+import fs from 'node:fs';
+import {setupCaller,removeCaller,listCallers,createTaskAsScript} from '../mcp/script-callers.mjs';
 const option=(args,name)=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
+const options=(args,name)=>args.flatMap((arg,index)=>arg===name&&args[index+1]!==undefined?[args[index+1]]:[]);
+const required=(args,name)=>{const value=option(args,name);if(value===undefined||value.startsWith('--'))throw compatError('INVALID_ARGUMENT',`${name} is required`,{status:400});return value;};
+// Script callers: credential setup and the narrow task-creation entry for local
+// scheduled scripts. The token is never accepted on the command line.
+export async function scriptCommand(args,{routerDirectory=sourcePath(ROOT,'runtime/router'),env=process.env}={}){
+ if(args[0]==='script-caller'){
+  if(args[1]==='setup')return setupCaller({routerDirectory,env,name:required(args,'--name'),projects:options(args,'--project'),maxTasksPerHour:required(args,'--max-per-hour'),authorization:required(args,'--authorization'),toApp:option(args,'--to-app')??'claude',rotate:args.includes('--rotate')});
+  if(args[1]==='list')return listCallers(routerDirectory);
+  if(args[1]==='remove')return removeCaller({routerDirectory,env,name:required(args,'--name')});
+  throw compatError('INVALID_ARGUMENT','Unknown script-caller command',{status:400});
+ }
+ if(args[0]==='script'&&args[1]==='create-task'){
+  const prompt=fs.readFileSync(required(args,'--prompt-file'),'utf8').replace(/^﻿/,'');
+  return createTaskAsScript({routerDirectory,env,name:required(args,'--caller'),title:required(args,'--title'),prompt,idempotencyKey:required(args,'--idempotency-key'),projectId:option(args,'--project'),model:option(args,'--model'),effort:option(args,'--effort'),taskVersion:option(args,'--task-version')});
+ }
+ throw compatError('INVALID_ARGUMENT','Unknown script command',{status:400});
+}
 export async function refreshClaudeMcp(thread,server='desktop-bridge',request=lifecycle){
  if(!thread||thread.startsWith('--')||!server||server.startsWith('--'))throw compatError('INVALID_ARGUMENT','Claude refresh requires --thread with an exact idle session ID and --server with an MCP server name');
  const nativeResult=await request('native',{payload:{nativeMethod:'mcpReconnect',args:[thread,server]}});
@@ -52,10 +71,12 @@ export async function main(args){
     else if(args[1]==='refresh-mcp'){if(app==='codex')result=await codexMcp('reload');else result=await refreshClaudeMcp(option(args,'--thread'),option(args,'--server')??'desktop-bridge');}
     else throw compatError('INVALID_ARGUMENT','Unknown compat command');
    }
+  }else if(args[0]==='script-caller'||args[0]==='script'){
+   result=await scriptCommand(args);
   }else if(args[0]==='install'){
    if(process.platform!=='win32')throw compatError('UNSUPPORTED_PLATFORM','Desktop installation requires Windows');
    const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',sourcePath(ROOT,'install.ps1'),...args.slice(1)],{stdio:'inherit',windowsHide:true});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});return;
-  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude] [--probe]','compat list','compat discover --app <app>','compat certify --app <app> --codex-thread <uuid> --claude-thread <local_uuid>','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>']};
+  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude] [--probe]','compat list','compat discover --app <app>','compat certify --app <app> --codex-thread <uuid> --claude-thread <local_uuid>','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>','script-caller setup --name <name> --project <abs-path> [--project ...] --max-per-hour <n> --authorization <owner statement> [--rotate]','script-caller list','script-caller remove --name <name>','script create-task --caller <name> --title <title> --prompt-file <file> --idempotency-key <key> [--project <abs-path>] [--model <id>] [--effort <level>]']};
   console.log(JSON.stringify(result,null,2));
- }catch(error){console.error(JSON.stringify({error:error.message,code:error.code??'BRIDGE_ERROR',dispatchNotStarted:error.dispatchNotStarted??false}));process.exitCode=1;}
+ }catch(error){console.error(JSON.stringify({error:error.message,code:error.code??'BRIDGE_ERROR',dispatchNotStarted:error.dispatchNotStarted??false,...(error.status?{httpStatus:error.status}:{}),...(error.retryAfterSeconds?{retryAfterSeconds:error.retryAfterSeconds}:{})}));process.exitCode=1;}
 }
