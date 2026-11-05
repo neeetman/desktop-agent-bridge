@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { lifecycle } from './claude-lifecycle.mjs';
 import { fileURLToPath } from 'node:url';
+import {NativeQueue} from '../../core/native-queue.mjs';
 
 const root = fileURLToPath(projectURL(''));
 const directory = path.resolve(process.argv[2] ?? sourcePath(root, 'runtime', 'claude-relay'));
@@ -16,7 +17,8 @@ const allowed = ['getSessionList', 'getSession', 'getTranscriptTail', 'getTransc
 const heartbeat = path.join(directory, 'heartbeat.json');
 const requestFile = path.join(directory, 'request.json');
 const responseFile = path.join(directory, 'response.json');
-let queue = Promise.resolve();
+const queue = new NativeQueue();
+const writes=new Set(['start','sendMessage','setModel','setEffort','warmSession','updateSession','mcpReconnect','stop']);
 const mainTransport = JSON.parse(fs.readFileSync(sourcePath(root,'claude-attach-compatibility.json'),'utf8')).transport === 'main-renderer-rpc';
 const connected = async () => {
   if(mainTransport){try{return (await lifecycle('status')).records.some(row=>row.attaches>0&&!row.error);}catch{return false;}}
@@ -55,9 +57,8 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) { size += chunk.length; if (size > 1024 * 1024) throw new Error('Request too large'); chunks.push(chunk); }
     const request = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!allowed.includes(request.method) || !Array.isArray(request.args)) return reply(400, { error: 'Unsupported native API method or arguments' });
-    const operation = queue.then(() => nativeCall(request));
-    queue = operation.catch(() => {});
-    reply(200, { result: await operation });
+    const result=await queue.enqueue(()=>nativeCall(request),{priority:writes.has(request.method),cancelled:()=>res.destroyed});
+    reply(200, { result });
   } catch (error) { reply(error.status ?? 502, { error: error.message, code:error.code, dispatchNotStarted:error.dispatchNotStarted }); }
 });
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(43128, '127.0.0.1', resolve); });

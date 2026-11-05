@@ -158,7 +158,10 @@ export class PeerRouter {
     const job = this.state.jobs[message.id];
     const stage = message.replyMessageId ? 'replied' : message.consumption?.acknowledgedAt ? 'acknowledged'
       : ['unknown','failed','expired','interrupted'].includes(job.status) ? job.status
-      : message.deliveredAt ? 'delivered' : job.status === 'queued' && job.blockedByUpdate ? 'waiting_for_adapter' : job.status;
+      : message.deliveredAt ? 'delivered' : job.status === 'queued' && job.blockedByUpdate
+        ? job.blockedByUpdate === 'CONTRACT_MISMATCH' ? 'waiting_for_contract'
+          : ['SERVICE_INITIALIZING','CREDENTIALS_NOT_READY'].includes(job.blockedByUpdate) ? 'waiting_for_connection' : 'waiting_for_adapter'
+        : job.status;
     return {id:message.id, callerId:message.callerId ?? null, kind:message.kind, from:message.from, to:message.to,
       stage, jobStatus:job.status, createdAt:message.createdAt, deliveredAt:message.deliveredAt ?? null,
       acknowledgedAt:message.consumption?.acknowledgedAt ?? null, replyId:message.replyMessageId ?? null,
@@ -231,7 +234,7 @@ export class PeerRouter {
       'expectReply=false 时不要回复，也不会自动转发最终回复；需要确认送达仅用 bridge_ack。',
       '决策请求另用 bridge_answer_decision(decisionId,answer)，普通最终文字不算答案。决策 ID 在正文前的决策行。',
       '规格/语义取舍必须 bridge_request_decision，收到答案前暂停相关部分；可以继续与该选择无关的工作。',
-      '对方 active 时积攒意见，在回报后合并成一条；本轮紧急需求也不能把 delivered 说成已处理。',
+      '普通消息可在对方 active 时投递，由原生会话追加或排队；expectReply 不控制投递时机。合并相关意见减少打扰，delivered 不代表已处理。',
       '回报第一行写原 messageId 和 taskVersion（规格文件路径+修订/sha）；不要拿旧规格回报当作最新验收。',
       '需要发起新协作时使用 bridge_send；需要对端选择时使用 bridge_request_decision。fromThreadId 仅在无法自动识别身份时填写上面的你的会话 ID。',
       '接受异步发送或决策请求后可结束当前轮等待；对端的回复/答案会自动唤醒本会话。无需中间人轮询或转发。',
@@ -268,13 +271,15 @@ export class PeerRouter {
       this.save();
     }
     if (job.status === 'queued' || job.status === 'dispatching') {
-      if (Date.now() > message.expiresAt && job.status === 'queued' && (message.explicitTtl || !job.blockedByUpdate)) { job.status = message.status = 'expired'; this.save(); return; }
+      if (Date.now() > message.expiresAt && job.status === 'queued') {
+        job.status = message.status = 'expired';job.error='Message TTL elapsed before native dispatch';this.save();return;
+      }
       if (job.status === 'queued' && message.from.app !== 'bridge' && !job.senderValidated) {
         await this.validate(message.from);
         job.senderValidated = true;
       }
-      const snapshot = await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}`);
       if(queuedHealth){
+        const snapshot = await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}`);
         if(snapshot.thread?.archived===true||snapshot.thread?.isArchived===true){
           this.unsubscribeHealth(message.to,'health_recipient_archived');return;
         }
@@ -282,10 +287,6 @@ export class PeerRouter {
         if(job.status!=='queued'||!this.healthRecipientEnabled(message.to,message)){
           if(job.status==='queued')this.skipHealth(job,'health_unsubscribed_or_protected');return;
         }
-      }
-      if (snapshot.thread?.status?.type === 'active') {
-        if (job.lastError !== 'Recipient is busy') { job.lastError = 'Recipient is busy'; delete job.blockedByUpdate; this.save(); }
-        return;
       }
       if(message.kind==='decision_answer'&&this.state.decisions[message.decisionId]?.status!=='answered')return;
       job.status = 'dispatching'; job.prompt ??= this.prompt(message); this.save();
@@ -304,24 +305,35 @@ export class PeerRouter {
           // already be answered, so keep using its durable continuation result.
           this.save();
           if(job.resumeDecisionId){
+            const snapshot=await this.backendRequest(message.to.app,`/v1/threads/${message.to.threadId}`);
+            if(snapshot.thread?.status?.type==='active'){
+              job.status='queued';job.lastError='Callback continuation waits for the current turn';this.save();return;
+            }
             const resumed=await this.backendRequest(message.to.app,`/v1/decisions/${job.resumeDecisionId}/respond`,'POST',{answer:peer.answer,peerDecisionId:peer.id,context:job.prompt,callbackMode:'peer'});
             task=resumed.continuation;
             if(!task)throw bad(502,'Decision continuation is missing');
           }
         }
-        task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined,...message.kind==='message'&&!message.expectReply?{peerNotification:true}:{} }, `peer-router:${message.id}`);
+        // Ordinary inputs, replies and decision questions use native delivery.
+        // Only an explicitly linked callback answer resumes a tracked task.
+        task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined,peerNotification:true }, `peer-router:${message.id}`);
       } catch (error) {
         if (error.code === 'CACHED_TASK_OUTCOME_UNKNOWN' || error.code === 'CACHED_TASK_FAILURE') {
           job.status = message.status = error.code === 'CACHED_TASK_FAILURE' ? 'failed' : 'unknown';
           job.error = error.message; this.save(); return;
         }
         if (error.status === 409) { job.status = 'queued';job.lastError=error.message;job.lastErrorCode=error.code; this.save(); return; }
-        if(error.status===503&&error.dispatchNotStarted){job.status='queued';job.blockedByUpdate=error.code;this.save();return;}
+        if(error.status===503&&error.dispatchNotStarted){job.status='queued';job.blockedByUpdate=error.code;job.lastError=error.message;job.lastErrorCode=error.code;this.save();return;}
         job.status = message.status = 'unknown'; job.error = error.message;
         if (!job.resumeDecisionId) job.needsLookup = true;
         this.save(); return;
       }
-      job.taskId = task.id; job.status = message.status = ['unknown', 'failed'].includes(task.status) ? task.status : 'delivered'; if(job.status==='delivered')message.deliveredAt = new Date().toISOString(); this.save();
+      if(task.completionEvidence==='native-input-accepted'){
+        message.responseMode='explicit';message.nativeAcceptance=task.completionEvidence;
+      }
+      job.taskId = task.id;job.status = ['unknown', 'failed'].includes(task.status) ? task.status : 'delivered';
+      if(!message.replyMessageId)message.status=message.consumption?.acknowledgedAt?'consumed':job.status;
+      if(job.status==='delivered')message.deliveredAt = new Date().toISOString();this.save();
       delete job.lastError;delete job.lastErrorCode;delete job.blockedByUpdate;this.save();
     }
     if (job.status !== 'delivered') return;
@@ -329,6 +341,12 @@ export class PeerRouter {
     if(task.turnId){job.observedTurnId=task.turnId;message.observedNativeTurnId=task.turnId;}
     if (['failed', 'unknown', 'interrupted'].includes(task.status)) { job.status = task.status;if(!message.replyMessageId)message.status = task.status;message.nativeTaskStatus=task.status;job.error = task.error; this.save(); return; }
     if (task.status === 'completed') {
+      if(task.completionEvidence==='native-input-accepted'){
+        message.responseMode='explicit';message.nativeAcceptance=task.completionEvidence;
+        // Delivery finished. Consumption/reply remain independently tracked by
+        // exact message ID, including after a router restart.
+        job.status='completed';this.save();return;
+      }
       message.completedAt = new Date().toISOString(); message.result = task.result;
       if (message.expectReply && !message.replyMessageId && !message.autoReplySuppressedBy && message.responseMode!=='explicit' && task.result?.trim()) {
         if(!message.pendingTurnChecks?.length&&message.consumption?.turnId&&message.consumption.turnId===task.turnId)await this.reply({ from: message.to, messageId: message.id, text: task.result,automatic:true });
@@ -345,7 +363,11 @@ export class PeerRouter {
       const jobs=Object.values(this.state.jobs).sort((a,b)=>Number(this.state.messages[b.id]?.kind==='decision_answer')-Number(this.state.messages[a.id]?.kind==='decision_answer'));
       for (const job of jobs) {
         if (!job.needsLookup && !['queued', 'dispatching', 'delivered'].includes(job.status)) continue;
-        const message = this.state.messages[job.id], key = `${message.to.app}:${message.to.threadId}`;
+        const message = this.state.messages[job.id];
+        // Serialize native inputs, not model turns. Polling a previously delivered
+        // task must never hold up the next input to the same conversation.
+        const lane=job.status==='delivered'?`:receipt:${job.id}`:'';
+        const key = `${message.to.app}:${message.to.threadId}${lane}`;
         if (!candidates.has(key)) candidates.set(key, job);
       }
       await Promise.allSettled([...candidates].map(async ([key, job]) => {

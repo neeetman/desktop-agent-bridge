@@ -37,10 +37,9 @@ test('separate destinations progress concurrently, one destination stays ordered
     turnByThread.set(a.to.threadId,'turn-A');turnByThread.set(c.to.threadId,'turn-C');await router.acknowledge({from:a.to,messageId:a.id});await router.acknowledge({from:c.to,messageId:c.id});
     tasks.set('task-0', { status: 'completed', result: 'ACK_A',turnId:'turn-A' });
     tasks.set('task-1', { status: 'completed', result: 'ACK_C',turnId:'turn-C' });
-    await tick();
+    const second = tick(); await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(router.receive(sourceA).messages.map(row => [row.replyTo, row.text]), [[a.id, 'ACK_A']]);
     assert.deepEqual(router.receive(sourceB).messages.map(row => [row.replyTo, row.text]), [[c.id, 'ACK_C']]);
-    const second = tick(); await new Promise(resolve => setImmediate(resolve));
     assert.equal(sent.filter(row => row.route === '/v1/threads/claude-a/messages').length, 2);
     const secondTask = `task-${sent.findIndex(row => row.body.prompt.includes('\nsecond\n'))}`;
     pending.shift()(); await second;

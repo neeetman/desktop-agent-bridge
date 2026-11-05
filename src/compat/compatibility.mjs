@@ -122,7 +122,7 @@ export class Compatibility {
     return {profile,adapterRoot,profileDigest:digest(canonical(profile)),generation,fileStamp:stamp,runningBuild:{...processInfo,hashes,packageVersion:profile.packageVersion,observedPackageVersion:processInfo.executable.match(/_(\d+(?:\.\d+){2,3})_/)?.[1]??null},installedBuild:inventory.installed.find(row=>row.app===app)??null};
   }
   save(state,event){if(event){state.journal.push({at:new Date(this.now()).toISOString(),...event});state.journal=state.journal.slice(-1000);}atomicJson(this.file,state);}
-  async resolve(app,capability,{pid,lease=false}={}){
+  async resolve(app,capability,{pid,lease=false,probeRead=false}={}){
     const inventory=await this.inventory();return this.locked(()=>{
       const state=this.state(),identity=this.identity();let selected;
       try{selected=this.evaluate(app,inventory,state);}catch(error){const old=state.apps[app]??{};state.apps[app]={...old,...error.runningBuild?{runningBuild:error.runningBuild,fileStamp:error.fileStamp,generation:error.generation}:{},phase:'blocked',blockedReason:error.code,lastError:error.message};this.save(state);throw error;}
@@ -130,7 +130,14 @@ export class Compatibility {
       if(pid&&selected.runningBuild.pid!==pid)throw compatError('IDENTITY_MISMATCH','Requested PID is not the selected desktop main process');
       const required=selected.profile.coreApiVersion===2&&app==='codex'&&capability==='execution'?'create':capability;
       if(!selected.profile.capabilities.includes(required))throw compatError('CAPABILITY_UNSUPPORTED',`${capability} is not validated for this build`);
-      const circuit=old.circuits?.[capability];if(circuit&&circuit.generation===selected.generation&&circuit.profileDigest===selected.profileDigest)throw compatError('CONTRACT_MISMATCH',`${capability} is blocked after a native contract mismatch; activate a validated profile or restart/probe during maintenance`);
+      const circuit=old.circuits?.[capability];
+      const blocked=circuit&&circuit.generation===selected.generation&&circuit.profileDigest===selected.profileDigest;
+      const probing=blocked&&capability==='read'&&probeRead&&lease;
+      if(blocked){
+        const owner=state.leases[circuit.probeLeaseId];
+        if(!probing||this.now()-Date.parse(circuit.lastProbeAt??circuit.at)<60000||owner&&owner.expiresAt>this.now()&&this.alive(owner.pid))
+          throw compatError('CONTRACT_MISMATCH',`${capability} is blocked after a native contract mismatch; read recovery is rate limited, writes require validated activation`);
+      }
       if(old.transition&&old.transition.generation===selected.generation)throw compatError('REFRESH_DEFERRED_BUSY','An adapter transition is waiting for safe activation');
       if(old.transition){old.transition=null;this.save(state,{app,event:'transition.recoveredAfterProcessRestart'});}
       const connection=readJson(path.join(this.root,app==='codex'?'runtime/connection.json':'runtime/claude-relay/connection.json'),null);
@@ -144,10 +151,21 @@ export class Compatibility {
       state.apps[app]=row;
       const result={app,...selected,binding};
       if(lease){result.leaseId=crypto.randomUUID();state.leases[result.leaseId]={app,pid:process.pid,createdAt:this.now(),expiresAt:this.now()+120000,binding};}
+      if(probing){result.readProbe=true;row.circuits.read={...circuit,lastProbeAt:new Date(this.now()).toISOString(),probeLeaseId:result.leaseId};}
       this.save(state,changed?{app,event:'selection',profileId:row.profileId,generation:row.generation,activationEpoch}:undefined);return result;
     });
   }
   async release(id){return this.locked(()=>{const state=this.state();delete state.leases[id];this.save(state);});}
+  async confirmReadProbe(selection){
+    const inventory=await this.inventory();
+    return this.locked(()=>{
+      const state=this.state(),row=state.apps[selection.app],circuit=row?.circuits?.read;
+      const checked=this.evaluate(selection.app,inventory,state);
+      if(!sameBinding(row?.binding,selection.binding)||row.transition||checked.generation!==selection.generation||checked.profileDigest!==selection.profileDigest||circuit?.probeLeaseId!==selection.leaseId)
+        throw compatError('CONFIG_EPOCH_CHANGED','Read probe no longer matches the active adapter');
+      delete row.circuits.read;this.save(state,{app:selection.app,event:'capability.readRecovered'});
+    });
+  }
   async trip(app,capability,binding){return this.locked(()=>{const state=this.state(),row=state.apps[app];if(row&&sameBinding(row.binding,binding)){row.circuits??={};row.circuits[capability]={generation:binding.generation,profileDigest:binding.profileDigest,at:new Date(this.now()).toISOString()};this.save(state,{app,event:'capability.contractMismatch',capability});}});}
   async report(app,binding,phase,details={}){return this.locked(()=>{const state=this.state(),row=state.apps[app];if(!row||row.phase==='blocked'||row.transition||canonical(row.binding)!==canonical(binding))throw compatError('CONFIG_EPOCH_CHANGED','Stale helper observation rejected');row.phase=phase;row.probe={at:new Date(this.now()).toISOString(),...details};row.helperProbes??={};row.helperProbes[details.kind??'monitor']=row.probe;this.save(state);return {reported:true};});}
   async doctor(app){
@@ -213,9 +231,14 @@ export class Compatibility {
   }
 }
 const coordinator=new Compatibility();
-export async function withCapability(app,capability,operation){
-  const selection=await coordinator.resolve(app,capability,{lease:true});
-  try{return await operation(selection);}catch(error){if(error.code==='CONTRACT_MISMATCH'){try{await coordinator.trip(app,capability,selection.binding);}catch{}}throw error;}finally{try{await coordinator.release(selection.leaseId);}catch{/* Preserve the native outcome. A stranded lease expires and only delays activation. */}}
+export async function withCapability(app,capability,operation,options){
+  return runWithCapability(coordinator,app,capability,operation,options);
+}
+export async function runWithCapability(manager,app,capability,operation,{recoverRead=false}={}){
+  const selection=await manager.resolve(app,capability,{lease:true,probeRead:capability==='read'&&recoverRead});
+  try{const result=await operation(selection);if(selection.readProbe)await manager.confirmReadProbe(selection);return result;}
+  catch(error){if(error.code==='CONTRACT_MISMATCH'){try{await manager.trip(app,capability,selection.binding);}catch{}}throw error;}
+  finally{try{await manager.release(selection.leaseId);}catch{/* A stranded lease expires; never replay a write. */}}
 }
 export function sameBinding(a,b){return !!a&&!!b&&canonical(a)===canonical(b);}
 export {coordinator};

@@ -17,6 +17,8 @@ const fail = (status, message) => Object.assign(new Error(message), { status });
 const nonempty = (value, field) => { if (typeof value !== 'string' || !value.trim()) throw fail(400, `${field} must be nonempty`); return value; };
 const same = (a, b) => { const x = Buffer.from(a ?? ''), y = Buffer.from(b ?? ''); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 function reportTask(task){
+  if(!task.cachedResult&&task.status==='failed'&&task.dispatchOutcome==='not-started')
+    return {...task,code:task.errorCode,dispatchNotStarted:true,dispatchStage:'notStarted'};
   if(!task.cachedResult||!['failed','unknown'].includes(task.status))return task;
   return {...task,code:task.status==='unknown'?'CACHED_TASK_OUTCOME_UNKNOWN':'CACHED_TASK_FAILURE',httpStatus:409,originalError:task.error,error:`Stored ${task.status} result for task ${task.id}, created at ${task.createdAt}. This request was not executed again. Inspect the original outcome before using a new idempotency key. Original error: ${task.error??'unavailable'}`,retrySafe:task.dispatchOutcome==='not-started'};
 }
@@ -58,7 +60,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     writeJson(path.join(stateDir, 'connection.json'), { token: state.token, initializing: true });
     try { await preflight(); }
     catch (error) {
-      if (error.code !== 'BUILD_UNSUPPORTED') { tools.close(); throw error; }
+      if (error.code !== 'BUILD_UNSUPPORTED' && !(error.status===503&&error.dispatchNotStarted)) { tools.close(); throw error; }
       // Keep local receipts and task lookup available across desktop updates.
       // Native operations still check capabilities on every dispatch.
       enableIpc = false;
@@ -103,15 +105,20 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     writeJson(file, value);
     return { ...value, credentialsFile: file };
   }
-  function watch(threadId, hostId = 'local') {
+  function watch(threadId, hostId = 'local', explicit = false) {
     nonempty(threadId, 'threadId');
     const key = `${hostId}:${threadId}`;
     state.watches[key] ??= { threadId, hostId, seen: {}, lastStatus: null };
+    if(explicit)state.watches[key].explicit=true;
     save();
     return { ...state.watches[key], callback: callback(threadId) };
   }
   const refreshing = new Set();
   async function refresh(watchState) {
+    const tracked=Object.values(state.tasks).filter(task=>task.threadId===watchState.threadId&&task.hostId===watchState.hostId);
+    // Keep explicit watches and streams, but retire automatic polling once a
+    // tracked task ends. Historical chats otherwise saturate native transports.
+    if(!watchState.explicit&&!streams.size&&tracked.length&&!tracked.some(task=>['running','awaiting_decision'].includes(task.status)))return;
     const key = `${watchState.hostId}:${watchState.threadId}`;
     if (refreshing.has(key)) return;
     refreshing.add(key);
@@ -198,16 +205,22 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
       if (dispatching.has(record.taskId)) await dispatching.get(record.taskId);
       return {...state.tasks[record.taskId],cachedResult:true};
     }
+    // Historical peerNotification is now the delivery-only transport for all
+    // peer inputs. It must never mutate the conversation's execution settings.
+    const notification=input.peerNotification===true&&input.callbackMode==='peer'&&!!input.threadId;
+    if(notification&&['model','effort','thinking','cwd','sandboxMode','approvalPolicy','writableRoots','projectId','workspaceId','environment','target'].some(key=>input[key]!==undefined))
+      throw fail(400,'Peer input delivery preserves native settings; update execution settings separately');
     if(tools.preflightDispatch)await tools.preflightDispatch(input);
     if(tools.prepareExecution)execution=await tools.prepareExecution(execution,{threadId:input.threadId});
     else if(execution.cwd)throw fail(400, 'This backend cannot safely create a session at an arbitrary cwd');
     // Another identical caller may have reserved its task during asynchronous preflight.
     if(idempotencyKey&&state.idempotency[idempotencyKey])return dispatch(input,idempotencyKey,internal);
-    if(input.peerNotification===true&&input.callbackMode==='peer'&&input.threadId){
+    if(notification){
+      internal={...internal,operation:'peer_notification'};
       const pending=Object.values(state.tasks).filter(t=>t.threadId===input.threadId&&t.hostId===(input.hostId??'local')&&active.has(t.status));
       if(pending.length===1&&pending[0].status==='awaiting_decision'&&state.decisions[pending[0].pendingDecisionId]?.status==='pending')internal={...internal,pausedTaskId:pending[0].id,operation:'peer_notification'};
     }
-    if (input.threadId && Object.values(state.tasks).some(task => task.threadId === input.threadId && task.hostId === (input.hostId ?? 'local') && active.has(task.status) && task.id !== internal.resumesTaskId && task.id !== internal.pausedTaskId)) throw fail(409, 'A bridge task is already pending for this session');
+    if (!notification && input.threadId && Object.values(state.tasks).some(task => task.threadId === input.threadId && task.hostId === (input.hostId ?? 'local') && active.has(task.status) && task.operation !== 'peer_notification' && task.id !== internal.resumesTaskId && task.id !== internal.pausedTaskId)) throw fail(409, 'A bridge task is already pending for this session');
     const task = { id: crypto.randomUUID(), status: 'prepared', operation: internal.operation ?? 'task', resumesTaskId: internal.resumesTaskId, pausedTaskId:internal.pausedTaskId, createdAt: new Date().toISOString(), hostId: input.hostId ?? 'local', threadId: input.threadId ?? null, baselineTurnIds: [], prompt: input.prompt, execution, callbackMode:input.callbackMode==='peer'?'peer':'external', taskVersion:input.taskVersion??null };
     task.peerOrigin=creationOrigin(input.prompt,idempotencyKey)??state.tasks[internal.resumesTaskId]?.peerOrigin??null;
     state.tasks[task.id] = task;
@@ -215,18 +228,18 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     save();
     const operation = (async () => {
       try {
-        if (task.threadId) {
+        if (task.threadId && !notification) {
           const snapshot = await tools.call('read_thread', { threadId: task.threadId, hostId: task.hostId, turnLimit: 10 });
           task.baselineTurnIds = (snapshot.turns ?? []).map(turn => turn.id);
           task.previousStatus = snapshot.thread?.status;
-          if(task.pausedTaskId&&(snapshot.thread?.status?.type==='active'||snapshot.turns?.[0]?.status==='inProgress'))throw Object.assign(new Error('Session is active; the notification must wait'),{dispatchNotStarted:true});
           if (task.operation === 'wake' && task.previousStatus?.type === 'active') throw new Error('Session is already active; use messages to queue work after its current task');
         }
         task.status = 'dispatching'; save();
         const prompt = `${input.prompt}\n\n${signals.instructions(task)}`;
         let result;
         if (task.threadId) {
-          result = await tools.call('send_message_to_thread', { threadId: task.threadId, hostId: task.hostId, prompt, ...nativeModelArgs(execution) });
+          const args={threadId:task.threadId,hostId:task.hostId,prompt,...notification?{}:nativeModelArgs(execution)};
+          result = notification&&tools.sendNotification ? await tools.sendNotification(args) : await tools.call('send_message_to_thread', args);
         } else {
           result = await tools.call('create_thread', { title: input.title, prompt, target: execution.target, ...nativeModelArgs(execution),...execution.executionPolicy?{executionPolicy:execution.executionPolicy,cwd:execution.cwd,requestId:task.id}:{} });
           if (!result.threadId) throw new Error('Desktop returned no threadId; creation outcome unknown');
@@ -235,6 +248,14 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         }
         if (result.isError || result.error) throw new Error(JSON.stringify(result));
         task.nativeResult = result;
+        if(notification){
+          // A peer message is an input delivery, not a new tracked model turn. The
+          // desktop can steer an active turn; never wait for or claim its answer.
+          task.status='completed';task.dispatchedAt=task.completedAt=new Date().toISOString();
+          task.completionEvidence='native-input-accepted';task.consumptionConfirmed=false;
+          emit('task.dispatched',{taskId:task.id,threadId:task.threadId,hostId:task.hostId});
+          save();return;
+        }
         task.status = task.pendingDecisionId ? 'awaiting_decision' : 'running'; task.dispatchedAt = new Date().toISOString();
         signals.bindTask(task);
         watch(task.threadId, task.hostId);
@@ -362,7 +383,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
         }
         if (req.method === 'GET' && !session[2]) return json(res, 200, await tools.call('read_thread', { threadId, hostId: url.searchParams.get('hostId') ?? 'local', turnLimit: 10, maxOutputCharsPerItem: 20000 }));
         if (req.method === 'POST' && session[2] === 'watch') {
-          const input = await body(req); return json(res, 200, watch(threadId, input.hostId));
+          const input = await body(req); return json(res, 200, watch(threadId, input.hostId, true));
         }
         if (req.method === 'POST' && session[2] === 'messages') {
           const input = await body(req); const task = reportTask(await dispatch({ ...input, threadId }, req.headers['idempotency-key']));

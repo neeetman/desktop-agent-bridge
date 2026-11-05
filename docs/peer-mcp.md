@@ -10,7 +10,7 @@ Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 
 {"toApp":"claude","toThreadId":"<查询确认的目标ID>","text":"请检查接口设计并回复结论","messageId":"review-api-v1","expectReply":true}
 ```
 
-使用 `bridge_send` 发送；接收方使用 `bridge_ack` 确认消费，使用 `bridge_reply({messageId,text})` 回复。路由器自动返回来源会话并在空闲时唤醒。`delivered` 只表示投递，不代表已阅读；结果未知的派发不会自动重发。相同请求复用稳定的 messageId，不同内容不能复用。
+使用 `bridge_send` 发送；接收方使用 `bridge_ack` 确认消费，使用 `bridge_reply({messageId,text})` 回复。路由器自动返回来源会话。普通消息、回复、决策问题均可在会话运行中交给原生接口追加或排队；`expectReply` 仅决定是否需要回复，不控制投递时机。只有关联到旧 callback 任务的决策续跑仍等待当前轮结束。`delivered` 只表示投递，不代表已阅读；结果未知的派发不会自动重发。相同请求复用稳定的 messageId，不同内容不能复用。
 
 `expectReply:false` 表示通知，接收方不得回复或继续转发。`bridge_receive` 查看收件箱，`bridge_message` 读消息状态，`bridge_archive_messages` 归档已结束消息，`bridge_health` 查看组件和原生连通性。
 
@@ -50,7 +50,7 @@ DeepSeek 的 workspaceId、workspaceName、workspacePath、originCwd 和 cwd 分
 {"toApp":"codex","toThreadId":"<托管会话ID>","sandboxMode":"danger-full-access","approvalPolicy":"never"}
 ```
 
-将以上参数交给 `bridge_set_permissions`。活动会话、有待批准请求、受保护或非托管会话会被拒绝。结果 `appliedTo:next-turn` 表示下一轮生效，后续 send/wake 会恢复持久策略。
+将以上参数交给 `bridge_set_permissions`。活动会话、有待批准请求、受保护或非托管会话会被拒绝。结果 `appliedTo:next-turn` 表示下一轮生效，托管任务的 send/wake 会恢复持久策略；MCP 普通消息只投递输入，保留原生当前配置。
 
 `bridge_settings.settings.nextTurnPermissions` 给出原生下一轮设置；顶层权限字段按 permissionScope 区分最近已执行轮和下一轮。完全权限仍受当前 Windows 进程身份和系统限制，不等于管理员权限。
 
@@ -78,3 +78,11 @@ the backlog. Existing task origins can be recovered only when the original
 creation header and idempotency record agree.
 
 `bridge_outbox({limit:20,stage:"waiting_for_adapter"})` 查询当前会话的发件回执，按新到旧排列，可将 nextCursor 作为下次的 after。发送重要指令时提供稳定的 messageId。若发送返回 SEND_RECEIPT_UNCONFIRMED，用 lookupMessageId 在原会话调用 bridge_message 核实，再决定是否按原 ID 和原参数重试。bridge_self 的 worker.status 比较运行中的代码和已安装代码；旧 worker 的状态也可在控制台适配管理页查看。
+
+## Delivery and read recovery
+
+Peer delivery finishes when the native desktop accepts the input. It does not track a new model turn, change model/permissions, or automatically forward an unrelated final answer. Replies use `bridge_reply` with the exact message ID; `bridge_ack` separately confirms consumption. Native writes remain serialized per destination, while receipt tracking runs independently.
+
+Queue entries distinguish `waiting_for_adapter` (build/profile gate), `waiting_for_contract` (native contract circuit), and `waiting_for_connection` (service initialization). Known-unsent messages expire at their original TTL even while blocked; uncertain writes are reconciled by their existing idempotency key and never blindly replayed.
+
+A blocked Codex read contract permits one validated `read_thread` recovery attempt after a 60-second cooldown. Recovery requires an unchanged desktop generation and adapter binding, and a valid native response. Failed or concurrent probes leave the circuit blocked. This does not relax write capability gates, replace helpers, reload MCP, or restart desktops.

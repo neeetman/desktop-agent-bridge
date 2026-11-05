@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Deliver messages, replies and decision questions into active chats using the native input path; waiting for a reply no longer blocks subsequent inputs.
+- Keep native acceptance, explicit consumption and exact-message replies separate, including across service restarts. Preserve current model and permission settings for peer inputs.
+- Recover Codex read circuits with rate-limited, generation-bound read probes, while keeping local receipts and independently gated sends available during a read failure.
+- Distinguish version, contract and connection waits in the console. Expire known-unsent inputs at their original TTL rather than dispatching stale work after recovery.
+- Filter supervisor process inventory in CIM and resolve the Windows session once, avoiding recovery shutdown caused by slow enumeration on desktops with many agent workers.
+
 ## 0.8.4 — 2026-11-03
 
 - Deliver peer notifications to idle chats paused on callback decisions without resolving the decision or completing its parent task.

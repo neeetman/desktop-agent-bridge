@@ -58,7 +58,9 @@ document
 const labels = { home: "通信总览", queue: "消息队列", adapters: "适配管理" };
 const stages = {
   queued: "已入队",
-  waiting_for_adapter: "等待适配",
+  waiting_for_adapter: "等待版本适配",
+  waiting_for_contract: "接口验证待恢复",
+  waiting_for_connection: "等待连接恢复",
   dispatching: "投递中",
   delivered: "已投递",
   acknowledged: "已读",
@@ -101,7 +103,7 @@ function group(stage) {
   if (["unknown", "failed", "interrupted"].includes(stage)) return "issue";
   if (["acknowledged", "replied"].includes(stage)) return "read";
   if (
-    ["queued", "waiting_for_adapter", "dispatching", "awaiting_ack"].includes(
+    ["queued", "waiting_for_adapter", "waiting_for_contract", "waiting_for_connection", "dispatching", "awaiting_ack"].includes(
       stage,
     )
   )

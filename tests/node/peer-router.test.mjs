@@ -21,6 +21,68 @@ function fixture() {
 }
 const from = { app: 'codex', threadId: 'c' }, to = { app: 'claude', threadId: 'a' };
 
+test('known-unsent adapter waits respect TTL; uncertain writes are not expired or replayed',async()=>{
+ const f=fixture();try{
+  const m=await f.router.send({from,to,text:'old instructions'});m.expiresAt=Date.now()-1;
+  const job=f.router.state.jobs[m.id];job.blockedByUpdate='CONTRACT_MISMATCH';
+  assert.equal(f.router.delivery(m).stage,'waiting_for_contract');await f.tick();
+  assert.equal(job.status,'expired');assert.equal(f.sends.length,0);
+  const uncertain=await f.router.send({from,to,text:'unknown input'});uncertain.expiresAt=Date.now()-1;
+  f.router.state.jobs[uncertain.id].status='unknown';await f.tick();
+  assert.equal(f.router.state.jobs[uncertain.id].status,'unknown');assert.equal(f.sends.length,0);
+ }finally{f.close();}
+});
+
+test('reply-requesting inputs do not read the recipient or wait for a turn; receipts survive restart',async()=>{
+ const f=fixture();let sends=0;const backend=async(app,route,method,body)=>{
+  if(route.endsWith('/settings'))return {settings:{}};
+  if(method==='POST'){sends++;assert.equal(body.peerNotification,true);return {id:'accepted-'+sends,status:'completed',completionEvidence:'native-input-accepted'};}
+  if(route.startsWith('/v1/tasks/'))return {status:'completed',completionEvidence:'native-input-accepted'};
+  throw Object.assign(Error('read circuit blocked'),{status:503,code:'CONTRACT_MISMATCH'});
+ };
+ try{
+  f.router.backendRequest=backend;
+  const first=await f.router.send({from,to,text:'first',messageId:'one'});await f.tick();
+  const second=await f.router.send({from,to,text:'steer',messageId:'two'});await f.tick();
+  assert.equal(sends,2);assert.equal(first.status,'delivered');assert.equal(second.consumption.status,'unconfirmed');assert.equal(first.responseMode,'explicit');
+  f.router.close();const restored=new PeerRouter({directory:f.directory,backendRequest:backend,pollMs:1e9});
+  try{
+   await restored.tick();assert.equal(sends,2);
+   await restored.reply({from:to,messageId:first.id,text:'exact reply'});
+   await restored.reply({from:to,messageId:first.id,text:'exact reply'});
+   assert.equal(restored.delivery(restored.state.messages[first.id]).stage,'replied');
+   assert.equal(restored.receive(from).messages.length,1);
+  }finally{restored.close();}
+ }finally{f.close();}
+});
+
+test('a fast explicit reply is not overwritten by a slower native acceptance response',async()=>{
+ const f=fixture();try{
+  const m=await f.router.send({from,to,text:'fast reply'});
+  f.router.backendRequest=async(app,route,method,...rest)=>{
+   if(method==='POST'){
+    await f.router.reply({from:to,messageId:m.id,text:'already handled'});
+    return {id:'native',status:'completed',completionEvidence:'native-input-accepted'};
+   }
+   if(route.startsWith('/v1/tasks/'))return {status:'completed',completionEvidence:'native-input-accepted'};
+   return f.backendRequest(app,route,method,...rest);
+  };
+  await f.tick();assert.equal(m.status,'replied');assert.equal(f.router.delivery(m).stage,'replied');
+  assert.equal(f.router.receive(from).messages.length,1);
+ }finally{f.close();}
+});
+
+test('a no-reply notification overtakes a running request and enters its active chat',async()=>{
+ const f=fixture();try{
+  f.setTask('running');const parent=await f.router.send({from,to,text:'long task'});await f.tick();
+  f.setBusy(true);const notice=await f.router.send({from,to,text:'foreground ready',expectReply:false});await f.tick();
+  assert.equal(f.sends.length,2);assert.equal(f.sends[1].body.peerNotification,true);
+  assert.equal(f.router.state.jobs[parent.id].status,'delivered');
+  assert.equal(f.router.state.jobs[notice.id].status,'delivered');
+  assert.equal(notice.consumption?.status,'unconfirmed');
+ }finally{f.close();}
+});
+
 test('update preflight blocks queued delivery without turning a known-unsent request into unknown',async()=>{
  const f=fixture();try{f.setTask('running');const message=await f.router.send({from,to,text:'defer update',messageId:'update'});let blocked=true;
  f.router.backendRequest=async(app,route,method,...rest)=>{if(method==='POST'&&blocked)throw Object.assign(Error('unsupported'),{status:503,code:'BUILD_UNSUPPORTED',dispatchNotStarted:true});return f.backendRequest(app,route,method,...rest);};
@@ -35,11 +97,11 @@ test('decision answers persist while the original sender is updating and are dis
  f.router.backendRequest=f.backendRequest;await f.tick();assert.equal(f.router.state.jobs[answer.answerMessageId].status,'delivered');assert.equal((await f.router.answerDecision({from:to,decisionId:decision.id,answer:'A'})).answerMessageId,answer.answerMessageId);
  }finally{f.close();}
 });
-test('peer request automatically returns one final reply, queues while busy, and cannot form a reply loop', async () => {
+test('peer request automatically returns one final reply, delivers while busy, and cannot form a reply loop', async () => {
   const f = fixture(); try {
     f.setTask('running');
     const message = await f.router.send({ from, to, text: 'ping', messageId: 'm' });
-    f.setBusy(true); await f.tick(); assert.equal(f.sends.length, 0);
+    f.setBusy(true); await f.tick(); assert.equal(f.sends.length, 1);
     f.setBusy(false); await f.tick();f.setBusy(true);f.setTurn('delivery-turn');await f.router.acknowledge({from:to,messageId:message.id});f.setBusy(false);f.setTask('completed');await f.tick();await f.tick();
     assert.equal(f.sends.length, 2);
     assert.equal(f.router.state.messages[message.id].status, 'replied');

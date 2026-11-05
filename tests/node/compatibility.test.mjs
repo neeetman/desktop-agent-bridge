@@ -6,10 +6,34 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
-import {Compatibility,adapterDigest,atomicJson,compatError} from '../../src/compat/compatibility.mjs';
+import {runWithCapability,Compatibility,adapterDigest,atomicJson,compatError} from '../../src/compat/compatibility.mjs';
 import bindingModule from '../../src/compat/helper-binding.cjs';
 import {DesktopTools} from '../../src/adapters/codex/native.mjs';
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
+test('read circuit recovers only after a validated read; write circuits are never probed',async()=>{
+ const f=fixture();try{
+  const s=await f.manager.resolve('codex','read');await f.manager.trip('codex','read',s.binding);
+  let calls=0;const op=async()=>{calls++;return {thread:{},turns:[]};};
+  await assert.rejects(runWithCapability(f.manager,'codex','read',op,{recoverRead:true}),{code:'CONTRACT_MISMATCH'});
+  f.tick(60001);
+  await assert.rejects(runWithCapability(f.manager,'codex','read',op),{code:'CONTRACT_MISMATCH'});
+  await runWithCapability(f.manager,'codex','read',op,{recoverRead:true});assert.equal(calls,1);assert.equal(f.manager.state().apps.codex.circuits.read,undefined);
+  await f.manager.trip('codex','send',s.binding);f.tick(60001);
+  await assert.rejects(runWithCapability(f.manager,'codex','send',op,{recoverRead:true}),{code:'CONTRACT_MISMATCH'});assert.equal(calls,1);
+ }finally{f.close();}
+});
+test('read recovery is single-flight, retains a failed circuit and rejects stale evidence',async()=>{
+ const f=fixture();try{
+  const s=await f.manager.resolve('codex','read');await f.manager.trip('codex','read',s.binding);f.tick(60001);
+  const probe=await f.manager.resolve('codex','read',{lease:true,probeRead:true});f.tick(60001);
+  await assert.rejects(f.manager.resolve('codex','read',{lease:true,probeRead:true}),{code:'CONTRACT_MISMATCH'});
+  await f.manager.release(probe.leaseId);
+  await assert.rejects(runWithCapability(f.manager,'codex','read',async()=>{throw compatError('CONTRACT_MISMATCH','still invalid');},{recoverRead:true}),{code:'CONTRACT_MISMATCH'});
+  assert.ok(f.manager.state().apps.codex.circuits.read);f.tick(60001);
+  await assert.rejects(runWithCapability(f.manager,'codex','read',async()=>{f.inventory().processes[0].createdAt='changed';return {};},{recoverRead:true}),{code:'CONFIG_EPOCH_CHANGED'});
+  assert.ok(f.manager.state().apps.codex.circuits.read);
+ }finally{f.close();}
+});
 function fixture(){
  const base=fs.mkdtempSync(path.join(os.tmpdir(),'desktop-compat-')),root=path.join(base,'checkout with spaces'),appdir=path.join(base,'application');fs.mkdirSync(path.join(appdir,'resources'),{recursive:true});fs.mkdirSync(root);
  const executable=path.join(appdir,'app.exe');fs.writeFileSync(executable,'exe');fs.writeFileSync(path.join(appdir,'chrome.dll'),'chrome');fs.writeFileSync(path.join(appdir,'resources/app.asar'),'asar');fs.writeFileSync(sourcePath(root,'adapter.cjs'),'// adapter v1\n');

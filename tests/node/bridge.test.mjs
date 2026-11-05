@@ -29,6 +29,29 @@ test('cold startup creates credentials before guarded native preflight and publi
  const failed=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-bootstrap-'));closed=false;
  try{await assert.rejects(startBridge({tools,stateDir:failed,port:0,enableIpc:false,preflight:async()=>{throw Error('native unavailable');}}),/native unavailable/);assert.equal(closed,true);assert.equal(JSON.parse(fs.readFileSync(path.join(failed,'connection.json'))).pid,undefined);}finally{removeTestDirectory(failed);}
 });
+test('read contract failure does not take down local receipts or independently guarded sends',async()=>{
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-read-circuit-'));
+ const tools={close(){},async call(name){assert.equal(name,'send_message_to_thread');return {threadId:'worker'};}};
+ const bridge=await startBridge({tools,stateDir,port:0,enableIpc:false,preflight:async()=>{throw Object.assign(Error('read blocked'),{code:'CONTRACT_MISMATCH',status:503,dispatchNotStarted:true});}});
+ try{
+  const response=await fetch(bridge.baseUrl+'/v1/threads/worker/messages',{method:'POST',headers:{Authorization:'Bearer '+bridge.token,'Content-Type':'application/json'},body:JSON.stringify({prompt:'input',callbackMode:'peer',peerNotification:true})});
+  assert.equal(response.status,202);assert.equal((await response.json()).completionEvidence,'native-input-accepted');
+ }finally{await bridge.close();removeTestDirectory(stateDir);}
+});
+test('completed task watches retire polling while explicit watches remain live',async()=>{
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-retire-'));let reads=0;
+ const tools={close(){},async call(){reads++;return {thread:{status:{type:'idle'}},turns:[]};}};
+ const bridge=await startBridge({tools,stateDir,port:0,pollMs:10,enableIpc:false});
+ try{
+  bridge.state.watches['local:old']={threadId:'old',hostId:'local',seen:{}};
+  bridge.state.tasks.old={threadId:'old',hostId:'local',status:'completed'};
+  await new Promise(resolve=>setTimeout(resolve,50));assert.equal(reads,0);
+  const response=await fetch(bridge.baseUrl+'/v1/threads/old/watch',{method:'POST',headers:{Authorization:'Bearer '+bridge.token,'Content-Type':'application/json'},body:'{}'});
+  assert.equal(response.status,200);await response.json();
+  for(let i=0;i<50&&!reads;i++)await new Promise(resolve=>setTimeout(resolve,10));
+  assert.ok(reads>0);assert.equal(bridge.state.watches['local:old'].explicit,true);
+ }finally{await bridge.close();removeTestDirectory(stateDir);}
+});
 test('duplicate startup cannot touch the live owner credentials, tasks or native preflight',async()=>{
  const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-owner-')),tools={close(){}};
  const first=await startBridge({tools,stateDir,port:0,enableIpc:false});

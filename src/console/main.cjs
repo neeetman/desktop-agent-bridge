@@ -339,7 +339,7 @@ if (!app.requestSingleInstanceLock()) {
     const notifySize = () => window.webContents.send("bridge:maximized", window.isMaximized());
     trayControl=require("./tray.cjs").installTray(window,async()=>{
       const {messages}=await queueWithReviews();
-      return {label:"路由在线",pending:messages.filter(m=>["queued","waiting_for_adapter","dispatching","awaiting_ack"].includes(m.stage)).length,
+      return {label:"路由在线",pending:messages.filter(m=>["queued","waiting_for_adapter","waiting_for_contract","waiting_for_connection","dispatching","awaiting_ack"].includes(m.stage)).length,
         read:messages.filter(m=>["acknowledged","replied"].includes(m.stage)).length,
         issues:messages.filter(m=>["unknown","failed","interrupted"].includes(m.stage)&&!m.review).length};
     });

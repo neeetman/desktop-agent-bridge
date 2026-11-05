@@ -33,7 +33,7 @@ test('a peer answer resumes the exact paused callback task ahead of old notifica
   const task=await request('/v1/tasks','POST',{prompt:'work'});
   const callback=await request('/v1/inbox','POST',{taskId:task.id,messageId:'callback',kind:'decision',question:'original question',options:['original A','original B']});
   const old=await router.send({from:supervisor,to:worker,text:'older queued work request',expectReply:true});
-  await tick();assert.equal(router.state.jobs[old.id].status,'queued');assert.equal(sends,0);
+  assert.equal(router.state.jobs[old.id].status,'queued');assert.equal(sends,0);
   const peer=await router.requestDecision({from:worker,to:supervisor,question:`Escalating callback ${callback.decisionId}`,options:['A','B']});
   await router.answerDecision({from:supervisor,decisionId:peer.id,answer:'B',context:'chosen direction'});
   busy=true;await tick();assert.equal(sends,0);
@@ -48,6 +48,8 @@ test('a peer answer resumes the exact paused callback task ahead of old notifica
   router.close();fs.writeFileSync(path.join(directory,'router/state.json'),crashSnapshot);
   await bridge.close();bridge=await startBridge({tools,stateDir:path.join(directory,'backend'),port:0,enableIpc:false,pollMs:1e9});
   router=makeRouter();await tick();assert.equal(sends,1);assert.equal(router.state.jobs[peer.answerMessageId].taskId,answer.taskId);
+  assert.equal(bridge.state.decisions[laterCallback.decisionId].status,'pending');
+  await tick();assert.equal(sends,2);assert.equal(router.state.jobs[old.id].status,'completed');
   assert.equal(bridge.state.decisions[laterCallback.decisionId].status,'pending');
   await assert.rejects(request(`/v1/decisions/${callback.decisionId}/respond`,'POST',{answer:'B',peerDecisionId:'different-peer',context:'other'}),/different peer/);
   // Missing linkage must not resolve an unrelated pending callback decision.

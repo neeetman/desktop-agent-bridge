@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "files": {
     "bridge.mjs": "src/core/bridge.mjs",
+    "native-queue.mjs": "src/core/native-queue.mjs",
     "contracts.mjs": "src/core/contracts.mjs",
     "signals.mjs": "src/core/signals.mjs",
     "execution-policy.cjs": "src/core/execution-policy.cjs",

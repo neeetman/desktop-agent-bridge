@@ -135,7 +135,10 @@ export class DesktopTools {
   async listModels(){const tool=(await this.listTools()).find(item=>item.name==='create_thread');return codexModelCatalog(tool?.inputSchema?.properties?.model?.description??'');}
   executionCapabilities(){const config=policy.readSettings();return {sandboxModes:['workspace-write','read-only','danger-full-access'],fullAccess:{sandboxMode:'danger-full-access',defaultApprovalPolicy:'never',writableRoots:'omit; full access is unrestricted'},permissionUpdates:'explicit; managed idle Codex threads only; pending approvals rejected',defaultSandboxMode:config.defaultSandboxMode??'workspace-write',approvalPolicies:['on-request','untrusted','never','on-failure'],allowedWritableRoots:config.allowedWritableRoots,executionPolicySettingsFile:policy.settingsFile(),executionPolicyPersistence:'per-thread; revalidated before every bridge wake',cwdPolicy:'registered-project-or-verified-git-worktree'};}
   async setPermissions(threadId,input){await this.checkExecutionReady();return this.executionRuntime.executionRpc('set_permissions',{threadId,policy:input});}
-  async preflightDispatch(input){await this.guardRuntime('codex','send',async()=>{});if(input.threadId&&this.isExecutionManaged(input.threadId))await this.checkExecutionReady();}
+  async preflightDispatch(input){await this.guardRuntime('codex','send',async()=>{});if(input.threadId&&this.isExecutionManaged(input.threadId)&&!(input.peerNotification===true&&input.callbackMode==='peer'))await this.checkExecutionReady();}
+  // Deliver into the existing execution context without preparing a new turn or
+  // changing permissions/model. Native send owns active-turn steering semantics.
+  async sendNotification(args){return this.rawCall('send_message_to_thread',args);}
   isExecutionManaged(threadId){return !!policy.loadState().threads[threadId];}
   async prepareExecution(execution,{threadId}={}){
     if(threadId)return execution;
@@ -213,7 +216,7 @@ export class DesktopTools {
     const value=unwrapTool(result);
     if(tool==='read_thread'&&(!value.thread||!Array.isArray(value.turns)))throw compatError('CONTRACT_MISMATCH','Native read_thread response changed');
     return value;
-    });
+    },{recoverRead:tool==='read_thread'});
   }
   close() { this.rpc.close(); this.settingsRpc?.close(); }
 }

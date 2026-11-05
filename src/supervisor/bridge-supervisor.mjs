@@ -32,7 +32,10 @@ const journal=path.join(DIRECTORY,'events.jsonl');
 const record=(type,data)=>{fs.appendFileSync(journal,JSON.stringify({time:new Date().toISOString(),type,...data})+'\n',{mode:0o600});};
 
 async function snapshot(){
-  const command="$ErrorActionPreference='Stop'; @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -in @('node.exe','python.exe','pythonw.exe','Claude.exe','ChatGPT.exe','codex.exe','DeepSeek Harness.exe') -and $_.SessionId -eq (Get-Process -Id $PID).SessionId } | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress";
+  // Filter in CIM and resolve our session once, not once per process. A busy
+  // multi-chat desktop may have hundreds of workers; client-side filtering can
+  // exceed the snapshot deadline and disable all automatic service recovery.
+  const command="$ErrorActionPreference='Stop'; $bridgeSession=(Get-Process -Id $PID).SessionId; $bridgeFilter=\"SessionId = $bridgeSession AND (Name = 'node.exe' OR Name = 'python.exe' OR Name = 'pythonw.exe' OR Name = 'Claude.exe' OR Name = 'ChatGPT.exe' OR Name = 'codex.exe' OR Name = 'DeepSeek Harness.exe')\"; @(Get-CimInstance Win32_Process -Filter $bridgeFilter -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine) | ConvertTo-Json -Compress";
   const {stdout}=await run(config.powershell,['-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,timeout:10000,maxBuffer:8*1024*1024,env:environment});
   return requireProcessSnapshot(JSON.parse(stdout.trim()||'[]'),process.pid);
 }
