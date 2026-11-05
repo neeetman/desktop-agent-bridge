@@ -16,6 +16,7 @@ The default project overview and contribution workflow are available in English.
 | [Update operations](update-operations.md) | Chinese | Compatibility diagnosis, activation, rollback |
 | [Update design](update-resilience.md) | Chinese | Design and implementation phases |
 | [Validation scope](validation.md) | Chinese | Completed checks and outstanding live validation |
+| [Active-chat delivery validation](validation-message-delivery-1105.md) | English | Running-chat inputs, read recovery, queue deadlines and restart receipts |
 | [npm releases](npm-release.md) | Chinese | Maintainer publication and npm installation |
 | [v0.8.0 release](releases/v0.8.0.md) | English | Published registry version and integrity |
 | [v0.8.1 release](releases/v0.8.1.md) | English | Repository layout, documentation, and release validation |

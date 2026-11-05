@@ -7,6 +7,7 @@
 - Recover Codex read circuits with rate-limited, generation-bound read probes, while keeping local receipts and independently gated sends available during a read failure.
 - Distinguish version, contract and connection waits in the console. Expire known-unsent inputs at their original TTL rather than dispatching stale work after recovery.
 - Filter supervisor process inventory in CIM and resolve the Windows session once, avoiding recovery shutdown caused by slow enumeration on desktops with many agent workers.
+- Retire completed-task polling and prioritize pending Claude inputs over background reads; expired or disconnected queued calls cannot execute later.
 
 ## 0.8.4 — 2026-11-03
 
