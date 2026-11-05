@@ -69,6 +69,28 @@ Frida 固定为 `17.9.1`。未知 Codex/Claude 文件哈希会拒绝附着；不
 - [npm 发布与安装](docs/npm-release.md)
 - [本次验证范围](docs/validation.md)
 
+### 脚本调用方（计划任务直接创建 Claude 任务）
+
+`bridge_create_task` 以桌面会话身份识别调用方；计划任务等本地脚本没有会话身份，改用单独授权的“脚本调用方”。它只能在白名单项目里新建 **Claude** 任务，受每小时速率上限约束，必须带 idempotencyKey；不能发消息、回答决策、改权限，也不使用 router token。
+
+所有者登记一次，并引用覆盖它的常设授权：
+
+```powershell
+desktop-agent-bridge script-caller setup --name uecapture-ops-poller --project "D:\UECapture" --max-per-hour 6 --authorization "<所有者常设授权原文>"
+desktop-agent-bridge script-caller list
+desktop-agent-bridge script-caller remove --name uecapture-ops-poller
+```
+
+令牌写入 `%LOCALAPPDATA%\desktop-agent-bridge\script-callers\<name>.token`，文件和目录 ACL 仅当前 Windows 用户可访问；router 在 `runtime/router/script-callers.json` 中只保存令牌 SHA-256 与白名单。已存在时需 `--rotate` 才会替换。配置每次请求时读取，登记/轮换/删除无需重启。
+
+脚本调用：
+
+```powershell
+desktop-agent-bridge script create-task --caller uecapture-ops-poller --title "<标题>" --prompt-file <UTF-8 文件> --idempotency-key <稳定键> [--project "D:\UECapture"] [--model <id>] [--effort <level>]
+```
+
+令牌只从文件读取并放在请求头中，不出现在命令行、输出或日志。成功时 stdout 输出任务 JSON（`caller: "script:<name>"`、`authorizationBasis: "standing-owner"`），退出码 0；失败时 stderr 输出 `{error, code, httpStatus, dispatchNotStarted, retryAfterSeconds?}`，退出码 1。同键同输入返回同一任务（`cachedResult: true`，不计入速率），同键不同输入返回 `IDEMPOTENCY_CONFLICT`。新会话提示词以 `[bridge {"from":"script:<name>","kind":"task_creation","authorization":"standing-owner",…}]` 开头，并注明所引用的所有者授权、脚本内容不能新增人类授权或批准工具权限。调用记录写入 `runtime/router/script-callers.jsonl`（不含提示词和令牌）。该 CLI 不会自动拉起 router；router 未运行时返回 `ROUTER_UNAVAILABLE`，脚本应回退到原有方式。
+
 运行数据、凭证、配置备份和日志位于 `runtime/`；权限白名单及托管线程策略位于 `%USERPROFILE%\.desktop-session-bridge\`。这些数据不进 Git。跨机器部署时重新生成，不复制旧机器的 token、会话 ID 或线程策略。
 
 ## 开发与验证

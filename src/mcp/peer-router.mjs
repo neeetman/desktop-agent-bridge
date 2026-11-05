@@ -11,6 +11,7 @@ import {coordinator} from '../compat/compatibility.mjs';
 import {canaryReceipt} from '../compat/canary-receipts.mjs';
 import {HealthMonitor} from './health-monitor.mjs';
 import {CallbackForwarder} from './callback-forwarder.mjs';
+import {SCRIPT_ROUTE,scriptCreateTask} from './script-callers.mjs';
 
 const ROOT = fileURLToPath(projectURL(''));
 const bad = (status, message) => Object.assign(new Error(message), { status });
@@ -444,8 +445,14 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
   const handleRequest = async (request, response) => {
     const reply = (status, body) => { response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(JSON.stringify(publicResult(body))); };
     try {
-      if (request.headers.origin || request.headers.authorization !== `Bearer ${router.state.token}`) throw bad(401, 'Local router authorization required');
       const url = new URL(request.url, 'http://localhost');
+      if (request.headers.origin) throw bad(401, 'Local router authorization required');
+      // Script callers authenticate with their own whitelisted credential, never the router token.
+      if (request.method === 'POST' && url.pathname === SCRIPT_ROUTE) {
+        let bytes = 0; const chunks = []; for await (const chunk of request) { bytes += chunk.length; if (bytes > 1024 * 1024) throw bad(413, 'Request too large'); chunks.push(chunk); }
+        return reply(202, await scriptCreateTask(router, request.headers, JSON.parse(Buffer.concat(chunks).toString('utf8'))));
+      }
+      if (request.headers.authorization !== `Bearer ${router.state.token}`) throw bad(401, 'Local router authorization required');
       if (request.method === 'GET' && url.pathname === '/health') return reply(200, { ok: true, canaryProtocol:1, pid: process.pid, messages: Object.keys(router.state.messages).length });
       if(request.method==='GET'&&url.pathname==='/v1/compatibility')return reply(200,await coordinator.doctor());
       let data = {}; if (request.method === 'POST') { let bytes = 0; const chunks = []; for await (const chunk of request) { bytes += chunk.length; if (bytes > 1024 * 1024) throw bad(413, 'Request too large'); chunks.push(chunk); } data = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -486,7 +493,7 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         case '/v1/native': { if (!['codex', 'claude', 'deepseek'].includes(data.app) || !/^\/v1\/(threads|projects|models|capabilities|tasks)(?:[/?]|$)/.test(data.route) || (data.method && data.method !== 'GET')) throw bad(400, 'Read-only native route required'); return reply(200, await router.backendRequest(data.app, data.route)); }
         default: throw bad(404, 'Unknown route');
       }
-    } catch (error) { const details=errorData(error,500);reply(details.httpStatus,{error:details.message,code:details.code,httpStatus:details.httpStatus}); }
+    } catch (error) { const details=errorData(error,500);reply(details.httpStatus,{error:details.message,code:details.code,httpStatus:details.httpStatus,...(error.retryAfterSeconds?{retryAfterSeconds:error.retryAfterSeconds}:{})}); }
   };
   atomic(path.join(router.directory, 'connection.json'), { baseUrl: `http://127.0.0.1:${server.address().port}`, token: router.state.token, pid: process.pid });
   server.removeListener('request',initializing);server.on('request',handleRequest);
