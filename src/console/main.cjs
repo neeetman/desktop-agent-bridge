@@ -83,8 +83,8 @@ function checkedApp(v) {
   if (!["codex", "claude"].includes(v)) throw Error("Invalid desktop");
   return v;
 }
-function runCertification(app,threads,config) {
-  return run(config.node||"node",[path.join(root,"bin/desktop-agent-bridge.mjs"),"compat","certify","--app",app,"--claude-thread",threads.claude,"--codex-thread",threads.codex],undefined,1020000);
+function runCertification(app,config) {
+  return run(config.node||"node",[path.join(root,"bin/desktop-agent-bridge.mjs"),"compat","certify","--app",app],undefined,1020000);
 }
 const watchFile=path.join(root,"runtime/candidates/console-watch.json");
 async function watchSettings() {
@@ -106,7 +106,7 @@ async function checkUnknown() {
     // Persist before the first native dispatch, including across console restarts.
     atomicJson(watchFile,prefs);
     try {
-      const result=await runCertification(pair.unknown[0],prefs.threads,await config());
+      const result=await runCertification(pair.unknown[0],await config());
       attempt.status="验收通过，等待导入";attempt.packages=result.packages;
     } catch(e){attempt.status="需要检查";attempt.error=e.message;}
     atomicJson(watchFile,prefs);
@@ -268,34 +268,30 @@ if (!app.requestSingleInstanceLock()) {
         throw Error("Invalid profile ID");
       return update(action, desktop, id);
     });
-    bind("certify",async (app,codex,claude)=>{
+    bind("certify",async (app)=>{
       checkedApp(app);
       if(updating) throw Error("已有维护操作正在运行");
       updating=true;
       try {
-        const {checkThreads}=await import("../compat/certify.mjs");
-        checkThreads({codex,claude},[]);
-        if(!await confirm("运行桌面能力验收？","将向专用会话发消息，在隔离目录创建测试会话，并在空闲且保护规则允许时测试权限与 MCP 重载。\nCodex "+codex+"\nClaude "+claude))return "";
-        const result=await runCertification(app,{claude,codex},await config());
+        if(!await confirm("运行桌面能力验收？","会在隔离目录自动创建 Codex 和 Claude 测试会话，检查消息回执，并在保护规则允许时测试权限与 MCP 重载。"))return "";
+        const result=await runCertification(app,await config());
         const summary=result.packages[app].capabilities.join(" · ");
         if(!await confirm("导入按能力验收的适配包？",summary+"\n"+result.profileId+"\n"+result.package))return "已验证 "+summary+"。适配包 "+result.package;
         await cli("compat","import",result.package);
         return "已导入 "+result.profileId+"（"+summary+"）。报告 "+result.report;
       } finally {updating=false;}
     });
-    bind("canary-watch",async (enabled,threads)=>{
+    bind("canary-watch",async (enabled)=>{
       const prefs=await watchSettings();
       if(enabled!==undefined){
         if(updating||typeof enabled!=="boolean")throw Error("维护操作正在运行");
         updating=true;
         try {
           if(enabled){
-            const {checkThreads}=await import("../compat/certify.mjs");
-            checkThreads(threads,[]);
-            if(!await confirm("自动验收未知构建？","控制台运行期间，新构建会向以下测试会话发送消息。\n"+threads.codex+"\n"+threads.claude))return prefs;
-            prefs.threads={codex:threads.codex,claude:threads.claude};
+            if(!await confirm("自动验收未知构建？","控制台运行期间，每组新构建会自动创建一对专用测试会话并检查回执。"))return prefs;
           }
           prefs.enabled=enabled;
+          delete prefs.threads;
           const {atomicJson}=await import("../compat/compatibility.mjs");
           atomicJson(watchFile,prefs);
         } finally {updating=false;}

@@ -51,9 +51,15 @@ export function checkExecutionOperation(caps, method, input) {
       { code: "CAPABILITY_UNSUPPORTED", status: 503, dispatchNotStarted: true },
     );
 }
-export async function probeCapabilities(app, call, checkBuild, save) {
+export async function probeCapabilities(app, call, checkBuild, save, creationEvidence) {
   const checks = {};
+  if (creationEvidence) {
+    checks.create = { status: "passed", evidence: creationEvidence };
+    certifiedCapabilities(app, checks);
+    save(checks);
+  }
   for (const capability of ["create", "permissions", "mcp"]) {
+    if (capability === "create" && creationEvidence) continue;
     if (
       capability === "permissions" &&
       (app === "claude" || checks.create.status !== "passed")

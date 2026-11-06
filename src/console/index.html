@@ -150,11 +150,9 @@
           <div id="packages"></div>
           <div class="result" id="result" role="status" hidden></div>
             <details class="canary-panel"><summary>未知版本 · 生成与验收</summary>
-              <p>使用两条专用会话核对收发与回执，随后在独立目录测试创建、权限和 MCP 重载。每个包只启用通过的能力。</p>
+              <p>在隔离目录自动创建两端的测试会话，验证消息回执、权限和 MCP 重载。会话 ID 记录在报告里，适配包只启用通过的能力。</p>
               <form id="certify-form">
                 <label>生成适配包<select id="certify-app"><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
-                <label>Codex 测试会话<input id="certify-codex" required autocomplete="off" placeholder="会话 UUID"></label>
-                <label>Claude 测试会话<input id="certify-claude" required autocomplete="off" placeholder="local_…"></label>
                 <button class="primary">开始验收</button>
               </form><p id="certify-result" role="status"></p>
               <label class="preference-row" for="canary-watch"><span class="preference-copy"><strong>检测到未知构建时自动验收</strong><small>控制台运行期间生效，每组指纹只尝试一次</small></span>

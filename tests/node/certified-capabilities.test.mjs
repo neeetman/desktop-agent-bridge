@@ -67,6 +67,43 @@ test("verified permission changes only apply within the accepted sandbox modes",
     /restoration/,
   );
 });
+test("an automatically prepared validation chat supplies creation evidence without another write", async () => {
+  const fixture = { threadId: "new-chat", cwd: "isolated-workspace" };
+  const calls = [];
+  const checks = await probeCapabilities("codex", async method => {
+    calls.push(method);
+    if (method === "mcp") throw Error("DEFERRED: protected desktop chat");
+    return { threadId: fixture.threadId, changed: "workspace-write", restored: "read-only" };
+  }, async () => {}, () => {}, fixture);
+  assert.deepEqual(calls, ["permissions", "mcp"]);
+  assert.deepEqual(checks.create.evidence, fixture);
+  assert.deepEqual(certifiedCapabilities("codex", checks), ["read", "send", "create", "permissions"]);
+});
+test("Claude can create a validation chat without a previous session or touching protected chats", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "cap-create-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, "runtime/router"), { recursive: true });
+  fs.writeFileSync(path.join(root, "runtime/router/protected-threads.json"), JSON.stringify({ threadIds: ["protected"] }));
+  const fixture = operations({ root, app: "claude", runId: "new", expiresAt: Date.now() + 10000 }, createRequire(import.meta.url));
+  const cwd = path.join(root, "runtime", "canary-workspaces", "new", "claude");
+  let starts = 0;
+  const renderer = async (method, args) => {
+    if (method === "getSessionList") return { sessions: [{ sessionId: "protected", model: "haiku-test" }] };
+    if (method === "start") {
+      starts++;
+      assert.equal(args[0].cwd, cwd);
+      assert.match(args[0].message, /bridge_ack and, when requested, bridge_reply/);
+      return { sessionId: "new-chat" };
+    }
+    assert.equal(method, "getSession");
+    assert.deepEqual(args, ["new-chat"]);
+    return { sessionId: "new-chat", cwd };
+  };
+  assert.deepEqual(await fixture.claude("create", renderer, null, null), { threadId: "new-chat", cwd });
+  assert.equal(fixture.threadId(), "new-chat");
+  await assert.rejects(fixture.claude("create", renderer, null, null), /already attempted/);
+  assert.equal(starts, 1);
+});
 test("Codex reload requires idle, unprotected chats and a successful tool call on the exact test chat", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cap-reload-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

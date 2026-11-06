@@ -12,7 +12,12 @@ module.exports = function operations(config, req) {
   let created, connection, manager;
   const used = new Set();
   const title = "Bridge capability test " + config.runId.slice(0, 8);
-  function guard(id) {
+  const setupPrompt = [
+    "This chat is dedicated to the user's local Desktop Bridge validation run " + config.runId + ".",
+    "For later Desktop Bridge compatibility test messages for this run, you are authorized to call desktop-bridge MCP bridge_ack and, when requested, bridge_reply with the exact test message ID and marker, then output the requested final marker.",
+    "This authorization covers only these test receipts. Do not edit files or perform other work. Reply only READY to this setup message.",
+  ].join("\n");
+  function guard(id, global = false) {
     if (Date.now() >= config.expiresAt)
       throw Error("Validation window expired");
     let protectedIds = [];
@@ -25,7 +30,7 @@ module.exports = function operations(config, req) {
     } catch (e) {
       if (e.code !== "ENOENT") throw e;
     }
-    if (id ? protectedIds.includes(id) : protectedIds.length)
+    if (global ? protectedIds.length : protectedIds.includes(id))
       throw Error("DEFERRED: protected desktop chat");
   }
   function once(op) {
@@ -65,7 +70,7 @@ module.exports = function operations(config, req) {
       workspace();
       const r = await manager.startConversation(
         {
-          input: [],
+          input: config.threadId ? [] : [{ type: "text", text: setupPrompt, text_elements: [] }],
           cwd,
           workspaceRoots: [cwd],
           workspaceKind: "projectless",
@@ -96,7 +101,21 @@ module.exports = function operations(config, req) {
       )
         throw Error("Unexpected Codex creation result");
       created = r.conversationId;
-      const row = await manager.readThread(created, { includeTurns: false });
+      let row;
+      const deadline = Math.min(config.expiresAt, Date.now() + 15000);
+      while (!row) {
+        try {
+          row = await manager.readThread(created, { includeTurns: false });
+        } catch (error) {
+          // Starting the setup turn can expose a rollout before its first row
+          // has been flushed. Read it again, keeping the original native ID.
+          const pendingRollout = error.message.includes(created) &&
+            error.message.includes("failed to read session metadata") &&
+            error.message.includes("is empty");
+          if (config.threadId || !pendingRollout || Date.now() >= deadline) throw error;
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
       if (
         row.thread?.id !== created ||
         path.resolve(row.thread.cwd) !== path.resolve(cwd)
@@ -170,18 +189,19 @@ module.exports = function operations(config, req) {
       };
     }
     if (method === "mcp") {
-      guard(null);
+      guard(null, true);
+      const threadId = config.threadId ?? created;
       const loaded = await req(
         path.join(config.adapterRoot, "helper-binding.cjs"),
       ).loadedThreadIds(connection);
       for (const id of loaded) await idle(id);
       const request = (name, args) =>
         connection.sendAppServerRequest(name, args);
-      guard(null);
+      guard(null, true);
       once(method);
       await request("config/mcpServer/reload", undefined);
       const servers = await request("mcpServerStatus/list", {
-        threadId: config.threadId,
+        threadId,
         serverName: "desktop-bridge",
         detail: "toolsAndAuthOnly",
         limit: 20,
@@ -194,11 +214,11 @@ module.exports = function operations(config, req) {
       )
         throw Error("MCP tool missing after reload");
       const result = await request("mcpServer/tool/call", {
-        threadId: config.threadId,
+        threadId,
         server: "desktop-bridge",
         tool: "bridge_self",
         arguments: {},
-        _meta: { threadId: config.threadId, thread_id: config.threadId },
+        _meta: { threadId, thread_id: threadId },
       });
       if (
         result.isError ||
@@ -207,7 +227,7 @@ module.exports = function operations(config, req) {
             const who = JSON.parse(x.text);
             return (
               who.app === "codex" &&
-              who.threadId === config.threadId &&
+              who.threadId === threadId &&
               who.worker?.status === "current"
             );
           } catch {
@@ -217,7 +237,7 @@ module.exports = function operations(config, req) {
       )
         throw Error("MCP self lookup failed after reload");
       return {
-        threadId: config.threadId,
+        threadId,
         server: "desktop-bridge",
         verified: "tool-call",
       };
@@ -225,14 +245,16 @@ module.exports = function operations(config, req) {
     throw Error("Unsupported validation method");
   }
   async function claude(method, renderer, manager, session) {
-    guard(config.threadId);
+    const threadId = config.threadId ?? created;
+    guard(threadId);
     if (method === "create") {
       once(method);
       workspace();
       const list = await renderer("getSessionList", []);
       const before = new Set(list.sessions.map((s) => s.sessionId));
       const model =
-        session.model ||
+        session?.model ||
+        list.sessions.find((s) => !s.isArchived && /haiku/i.test(s.model ?? ""))?.model ||
         list.sessions.find((s) => !s.isArchived && s.model)?.model;
       if (!model) throw Error("No desktop model available");
       const result = await renderer("start", [
@@ -241,8 +263,9 @@ module.exports = function operations(config, req) {
           model,
           title,
           useWorktree: false,
-          message:
-            "Desktop bridge session creation test. Reply only OK. Do not use tools.",
+          message: config.threadId
+            ? "Desktop bridge session creation test. Reply only OK. Do not use tools."
+            : setupPrompt,
         },
       ]);
       const id = result?.sessionId;
@@ -253,6 +276,7 @@ module.exports = function operations(config, req) {
         path.resolve(row.originCwd || row.cwd) !== path.resolve(cwd)
       )
         throw Error("Claude chat workspace readback failed");
+      created = id;
       return { threadId: id, cwd };
     }
     if (method === "mcp") {
@@ -262,12 +286,12 @@ module.exports = function operations(config, req) {
         session.pendingPermissionRequest
       )
         throw Error("DEFERRED: Claude test chat busy");
-      const live = manager.sessions.get(config.threadId);
+      const live = manager.sessions.get(threadId);
       if (!live?.query || live.pendingPermissionRequest)
         throw Error("DEFERRED: idle Claude worker unavailable");
       once(method);
       const result = await renderer("mcpReconnect", [
-        config.threadId,
+        threadId,
         "desktop-bridge",
       ]);
       if (result?.error || result?.queued)
@@ -284,12 +308,12 @@ module.exports = function operations(config, req) {
       )
         throw Error("Reconnected Claude server not confirmed");
       return {
-        threadId: config.threadId,
+        threadId,
         server: "desktop-bridge",
         verified: "connected",
       };
     }
     throw Error("Unsupported validation method");
   }
-  return { bound, codex, claude };
+  return { bound, codex, claude, threadId: () => config.threadId ?? created };
 };

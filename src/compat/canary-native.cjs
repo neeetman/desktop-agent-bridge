@@ -119,13 +119,13 @@ function attach(config, operations) {
           ")",
       );
     }
-    const id = config.threadId;
-    const s = await renderer("getSession", [id]);
-    if (s?.sessionId !== id || s.isArchived)
+    const id = advanced.threadId();
+    const s = id ? await renderer("getSession", [id]) : null;
+    if (id && (s?.sessionId !== id || s.isArchived))
       throw Error("Claude test chat unavailable or archived");
     if (method === "probe") {
       const list = await manager.getSessionList();
-      if (!list.sessions.some((x) => x.sessionId === id))
+      if (id && !list.sessions.some((x) => x.sessionId === id))
         throw Error("Test chat missing from native session list");
       const ok = await page[0].executeJavaScript(
         '["sendMessage","getTranscriptTail","getTranscriptPage"].every(k=>typeof window["claude.web"].LocalSessions[k]==="function")',
@@ -133,6 +133,8 @@ function attach(config, operations) {
       if (!ok) throw Error("Claude session method missing");
       return { connected: true, version: app.getVersion() };
     }
+    if (method === "create") return advanced.claude(method, renderer, manager, s);
+    if (!s) throw Error("Create a dedicated Claude validation chat first");
     if (method === "send") {
       if (s.turnRunning || s.isRunning || s.pendingPermissionRequest)
         throw Error("Test chat is busy");

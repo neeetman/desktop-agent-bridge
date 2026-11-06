@@ -492,9 +492,9 @@ $("certify-form").onsubmit=async event=>{
   state.busy=true;
   const form=event.currentTarget,button=form.querySelector("button");
   button.disabled=true;
-  $("certify-result").textContent="正在检查原生接口并等待两端消费回执…";
+  $("certify-result").textContent="正在准备测试会话并验收两端回执…";
   try {
-    $("certify-result").textContent=await window.bridge.certify($("certify-app").value,$("certify-codex").value.trim(),$("certify-claude").value.trim());
+    $("certify-result").textContent=await window.bridge.certify($("certify-app").value);
   } catch(e){$("certify-result").textContent=e.message;}
   finally {button.disabled=false;state.busy=false;await desktops();}
 };
@@ -502,9 +502,8 @@ async function watchStatus(change=false){
   const toggle=$("canary-watch");
   toggle.disabled=true;
   try{
-    const prefs=await window.bridge.canaryWatch(change?toggle.checked:undefined,{codex:$("certify-codex").value.trim(),claude:$("certify-claude").value.trim()});
+    const prefs=await window.bridge.canaryWatch(change?toggle.checked:undefined);
     toggle.checked=prefs.enabled;
-    for(const name of ["codex","claude"])if(!change&&!$("certify-"+name).value)$("certify-"+name).value=prefs.threads?.[name]||"";
     const last=prefs.attempts[prefs.latest];
     $("canary-watch-status").textContent=last?[last.status,last.error,...Object.entries(last.packages||{}).map(([app,p])=>app+" "+(p.capabilities||[]).join(", ")+" · "+p.folder)].filter(Boolean).join(" · "):"";
   }catch(e){if(change)toggle.checked=!toggle.checked;$("canary-watch-status").textContent=e.message;}
