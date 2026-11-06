@@ -2,6 +2,12 @@
 
 Run `desktop-agent-bridge console` (from a checkout, `node bin/desktop-agent-bridge.mjs console`) to monitor delivery, search by caller or router message ID, inspect the matching desktop profile, check GitHub for an exact build match or import a trusted local adapter package, and activate it when idle. The Electron console includes a connection map, a searchable queue and individual delivery timelines. Install optional npm dependencies to run it. New builds require a validated matching profile.
 
+### Owner-configured delegation
+
+The owner can edit `~/.desktop-session-bridge/delegations.json` to let an exact desktop chat convey scoped decisions. The format is `{ "version": 1, "delegations": [{ "app": "claude", "threadId": "local_<exact-id>", "scope": "Local UE onboarding and repair", "actions": ["release", "promotion", "acceptance-exception", "shared-runtime-release", "worker-pr-merge"] }] }`. Include only the actions the owner wants to delegate. The router reads the file on use and checks it again before sending queued input. A missing or invalid entry confers no authority.
+
+The bridge inserts the owner scope ahead of the message body, including for task creation. Recipients still check that the requested work falls within the listed scope and actions. Deletion, spending, external communication, account or security changes, and tool permission approval stay outside delegation. No MCP tool edits the file. Only a runtime-identified sender qualifies, and supplying a chat ID as a tool argument is insufficient. The local router bearer credential and same-user filesystem are administrative trust boundaries. Restart the router after upgrading the code and reconnect resident MCP workers to load sender evidence and updated instructions.
+
 For a previously unseen build, the console can discover a structural candidate and validate messaging on two dedicated chats. [Automatic validation and CLI commands](docs/unknown-builds.md).
 
 Closing the console sends it to the Windows notification area. Left-click its icon to reopen it, or right-click for queue counts and **Quit console**. The console and its preview follow the system light or dark theme.

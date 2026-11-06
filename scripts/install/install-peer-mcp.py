@@ -19,7 +19,7 @@ def install(root, home, codex_home, node):
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     backup = root / 'runtime' / 'mcp-config-backups' / stamp
     revision = hashlib.sha256(b''.join(source_file(root, name).read_bytes() for name in
-        ['peer-client.mjs', 'peer-catalog.mjs', 'peer-call.mjs'])).hexdigest()[:16]
+        ['peer-client.mjs', 'peer-catalog.mjs', 'peer-call.mjs', 'delegations.mjs'])).hexdigest()[:16]
     spec = {'type': 'stdio', 'command': node, 'args': [str(source_file(root, 'peer-client.mjs'))],
             'env': {'DESKTOP_BRIDGE_CLIENT_REVISION': revision}}
     codex, claude = codex_home / 'config.toml', home / '.claude.json'

@@ -25,6 +25,7 @@
     "deepseek-native.mjs": "src/adapters/deepseek/deepseek-native.mjs",
     "deepseek-plugin.mjs": "src/adapters/deepseek/deepseek-plugin.mjs",
     "client.mjs": "src/mcp/client.mjs",
+    "delegations.mjs": "src/mcp/delegations.mjs",
     "peer-call.mjs": "src/mcp/peer-call.mjs",
     "peer-catalog.mjs": "src/mcp/peer-catalog.mjs",
     "peer-client.mjs": "src/mcp/peer-client.mjs",

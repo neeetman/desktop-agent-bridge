@@ -111,3 +111,7 @@ npm run check
 本仓库从已验证的 v0.7 运行代码整理而来，排除了安装包提取物、旧的一次性分析脚本、真实聊天记录和本机运行状态。源机器的真实通信证据不随源码分发；独立仓库的离线测试不能替代第二台机器的冷安装和整机重启验收。
 
 许可证见 [MIT](LICENSE)。发布包采用显式文件清单，不包含本机 runtime 或凭证。
+
+## 本地所有者委托
+
+所有者可在 `~/.desktop-session-bridge/delegations.json` 配置精确的 `app`、`threadId`、`scope` 和 `actions`。桥接器会在正文前标出经运行时身份确认的发送方及委托范围。手动填写会话 ID 只能用于路由。配置格式及可选事项见 [英文说明](README.md#owner-configured-delegation)。

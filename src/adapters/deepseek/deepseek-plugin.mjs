@@ -76,7 +76,7 @@ export async function apply(ctx, config) {
       const threadId = exec.agent?.session?.id;
       if (!threadId) throw new Error('A desktop session Agent is required for bridge tools');
       const who = { app: 'deepseek', threadId };
-      const self = async args => { if (args.fromThreadId && args.fromThreadId !== threadId) throw new Error('fromThreadId disagrees with the current runtime identity'); return who; };
+      const self = async args => { if (args.fromThreadId && args.fromThreadId !== threadId) throw new Error('fromThreadId disagrees with the current runtime identity'); return { ...who, identityEvidence: 'ToolExecution.agent.session.id' }; };
       const value = await callPeerTool(tool.name, args, { request, self, identity: async args => ({ ...await self(args), evidence: 'ToolExecution.agent.session.id', needsThreadId: false }) });
       fs.appendFileSync(path.join(directory, 'tool-calls.jsonl'), JSON.stringify({ time: new Date().toISOString(), tool: tool.name, threadId }) + '\n');
       return { content: [{ type: 'text', text: JSON.stringify(value) }] };

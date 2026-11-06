@@ -17,7 +17,7 @@ class McpInstallTest(unittest.TestCase):
     def fixture(self, directory):
         root, home = Path(directory) / 'checkout with spaces', Path(directory) / 'home'
         root.mkdir()
-        for name in ('peer-client.mjs', 'peer-catalog.mjs', 'peer-call.mjs'):
+        for name in ('peer-client.mjs', 'peer-catalog.mjs', 'peer-call.mjs', 'delegations.mjs'):
             (root / name).write_text('// fixture')
         return root, home, home / '.codex'
 
