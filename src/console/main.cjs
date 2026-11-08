@@ -5,11 +5,21 @@ const { tmpdir } = require("node:os");
 const { pathToFileURL } = require("node:url");
 const { execFile } = require("node:child_process");
 const { createHash } = require("node:crypto");
-const root = path.resolve(__dirname, "../..");
+const root = app.isPackaged
+  ? require("./package.json").bridgeRoot
+  : path.resolve(__dirname, "../..");
 const page = pathToFileURL(path.join(__dirname, "index.html")).href;
+const compatModule = (file) => import(pathToFileURL(path.join(root, "src/compat", file)).href);
 let window,
   trayControl,
-  updating = false;
+  updating = null;
+function maintenanceMessage() {
+  return `正在${updating.label}（开始于 ${new Date(updating.startedAt).toLocaleTimeString("zh-CN", {hour12:false})}），请等待完成后再操作。`;
+}
+function beginMaintenance(label) {
+  if (updating) throw Error(maintenanceMessage());
+  updating = {label, startedAt:new Date().toISOString()};
+}
 app.setName("Desktop Agent Bridge");
 nativeTheme.themeSource="system";
 app.setPath(
@@ -88,19 +98,20 @@ function runCertification(app,config) {
 }
 const watchFile=path.join(root,"runtime/candidates/console-watch.json");
 async function watchSettings() {
-  const {readJson}=await import("../compat/compatibility.mjs");
+  const {readJson}=await compatModule("compatibility.mjs");
   return readJson(watchFile,{enabled:false,attempts:{}});
 }
 async function checkUnknown() {
   if(updating)return;
-  updating=true;
+  beginMaintenance("检查未知桌面构建");
   try {
     const prefs=await watchSettings();
     if(!prefs.enabled)return;
-    const {unknownPair}=await import("../compat/canary-watch.mjs");
+    const {unknownPair}=await compatModule("canary-watch.mjs");
     const pair=unknownPair((await cli("doctor")).apps);
     if(!pair||prefs.attempts[pair.key])return;
-    const {atomicJson}=await import("../compat/compatibility.mjs");
+    updating.label="自动验收未知构建（最长约 17 分钟）";
+    const {atomicJson}=await compatModule("compatibility.mjs");
     const attempt={at:new Date().toISOString(),status:"验收中"};
     prefs.attempts[pair.key]=attempt;prefs.latest=pair.key;
     // Persist before the first native dispatch, including across console restarts.
@@ -110,7 +121,7 @@ async function checkUnknown() {
       attempt.status="验收通过，等待导入";attempt.packages=result.packages;
     } catch(e){attempt.status="需要检查";attempt.error=e.message;}
     atomicJson(watchFile,prefs);
-  } finally {updating=false;}
+  } finally {updating=null;}
 }
 async function confirm(title, detail) {
   const result = await dialog.showMessageBox(window, {
@@ -126,8 +137,10 @@ async function confirm(title, detail) {
 }
 async function update(action, value, chosenProfile) {
   const desktop = checkedApp(value);
-  if (updating) throw Error("已有维护操作正在运行");
-  updating = true;
+  beginMaintenance(({
+    probe:"检查 " + desktop + " 连接", discover:"生成 " + desktop + " 候选包",
+    local:"导入本机适配包", upstream:"检查 GitHub 适配包", activate:"激活适配包",
+  })[action] || "处理适配包");
   let dir;
   try {
     if (action === "probe") {
@@ -153,7 +166,7 @@ async function update(action, value, chosenProfile) {
         return "";
       const result = await cli("compat", "import", folder);
       return {
-        message: "已验证适配包 " + result.profileId,
+        message: "已导入适配包 " + result.profileId + "。请选择“空闲时激活”以附着并检查就绪状态。",
         profileId: result.profileId,
       };
     }
@@ -174,7 +187,7 @@ async function update(action, value, chosenProfile) {
         return "";
       const imported = await cli("compat", "import", dir);
       return {
-        message: "已验证适配包 " + imported.profileId,
+        message: "已导入适配包 " + imported.profileId + "。请选择“空闲时激活”以附着并检查就绪状态。",
         profileId: imported.profileId,
       };
     }
@@ -200,8 +213,9 @@ async function update(action, value, chosenProfile) {
     }
     throw Error("Unknown operation");
   } finally {
-    updating = false;
-    if (dir) await fs.rm(dir, { recursive: true, force: true });
+    try {
+      if (dir) await fs.rm(dir, { recursive: true, force: true });
+    } finally { updating = null; }
   }
 }
 
@@ -230,7 +244,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     bind("login-startup", enabled => {
       if (process.platform !== "win32") throw Error("Windows login startup requires Windows");
-      const options = {path:process.execPath, args:[__filename]};
+      const options = {path:process.execPath, args:app.isPackaged ? [] : [__filename]};
       const name = "DesktopAgentBridgeConsole";
       if (enabled !== undefined) {
         if (typeof enabled !== "boolean") throw Error("Invalid startup setting");
@@ -239,9 +253,11 @@ if (!app.requestSingleInstanceLock()) {
       return app.getLoginItemSettings(options).launchItems.some(item =>
         item.scope === "user" && item.name === name && item.enabled &&
         path.resolve(item.path).toLowerCase() === process.execPath.toLowerCase() &&
-        item.args.length === 1 && path.resolve(item.args[0]).toLowerCase() === __filename.toLowerCase());
+        item.args.length === options.args.length && options.args.every((arg, i) =>
+          path.resolve(item.args[i]).toLowerCase() === arg.toLowerCase()));
     });
     bind("queue",queueWithReviews);
+    bind("maintenance", () => updating && {...updating});
     bind("desktops", async () => {
       const [result, deepseek, profiles] = await Promise.all([
         cli("doctor"),
@@ -270,31 +286,30 @@ if (!app.requestSingleInstanceLock()) {
     });
     bind("certify",async (app)=>{
       checkedApp(app);
-      if(updating) throw Error("已有维护操作正在运行");
-      updating=true;
+      beginMaintenance("验收桌面能力（最长约 17 分钟）");
       try {
         if(!await confirm("运行桌面能力验收？","会在隔离目录自动创建 Codex 和 Claude 测试会话，检查消息回执，并在保护规则允许时测试权限与 MCP 重载。"))return "";
         const result=await runCertification(app,await config());
         const summary=result.packages[app].capabilities.join(" · ");
         if(!await confirm("导入按能力验收的适配包？",summary+"\n"+result.profileId+"\n"+result.package))return "已验证 "+summary+"。适配包 "+result.package;
         await cli("compat","import",result.package);
-        return "已导入 "+result.profileId+"（"+summary+"）。报告 "+result.report;
-      } finally {updating=false;}
+        return "已导入 "+result.profileId+"（"+summary+"）。请选择“空闲时激活”以附着并检查就绪状态。报告 "+result.report;
+      } finally {updating=null;}
     });
     bind("canary-watch",async (enabled)=>{
       const prefs=await watchSettings();
       if(enabled!==undefined){
-        if(updating||typeof enabled!=="boolean")throw Error("维护操作正在运行");
-        updating=true;
+        if(typeof enabled!=="boolean")throw Error("Invalid automatic validation setting");
+        beginMaintenance("设置自动验收");
         try {
           if(enabled){
             if(!await confirm("自动验收未知构建？","控制台运行期间，每组新构建会自动创建一对专用测试会话并检查回执。"))return prefs;
           }
           prefs.enabled=enabled;
           delete prefs.threads;
-          const {atomicJson}=await import("../compat/compatibility.mjs");
+          const {atomicJson}=await compatModule("compatibility.mjs");
           atomicJson(watchFile,prefs);
-        } finally {updating=false;}
+        } finally {updating=null;}
       }
       return prefs;
     });

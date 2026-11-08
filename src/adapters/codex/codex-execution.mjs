@@ -6,7 +6,7 @@ import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
 import {coordinator,withCapability,sameBinding,compatError} from '../../compat/compatibility.mjs';
 import policy from '../../core/execution-policy.cjs';
-import {checkExecutionOperation} from '../../compat/capability-checks.mjs';
+import {checkExecutionOperation,verifyFullAccess} from '../../compat/capability-checks.mjs';
 const run=promisify(execFile);let attaching;
 export async function ensureExecution(){
  const selection=await coordinator.resolve('codex','execution');
@@ -16,12 +16,15 @@ export async function ensureExecution(){
 }
 export async function executionRpc(method,params={}){
  if(method==='status')return executionWire(method,params);
- return withCapability('codex','execution',selection=>{
+ return withCapability('codex','execution',async selection=>{
+   const request={...params,binding:selection.binding,expiresAt:Date.now()+90000};
    if(selection.profile.coreApiVersion===2){
      const input=method==='prepare'?policy.loadState().threads[params.threadId]:params.args??params.policy;
-     checkExecutionOperation(selection.profile.capabilities,method,input);
+     const fullAccess=input?.sandboxMode==='danger-full-access';
+     checkExecutionOperation(selection.profile.capabilities,method,input,fullAccess&&policy.readSettings().allowFullAccess===true);
+     if(fullAccess)return verifyFullAccess(method,await executionWire(method,request));
    }
-   return executionWire(method,{...params,binding:selection.binding,expiresAt:Date.now()+90000});
+   return executionWire(method,request);
  });
 }
 export async function executionWire(method,params={}){

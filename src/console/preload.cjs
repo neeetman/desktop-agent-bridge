@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("bridge", {
   loginStartup: enabled => ipcRenderer.invoke("bridge:login-startup", enabled),
   queue: () => ipcRenderer.invoke("bridge:queue"),
   desktops: () => ipcRenderer.invoke("bridge:desktops"),
+  maintenance: () => ipcRenderer.invoke("bridge:maintenance"),
   certify: (app) => ipcRenderer.invoke("bridge:certify",app),
   canaryWatch: (enabled) => ipcRenderer.invoke("bridge:canary-watch",enabled),
   update: (action, app, profile) =>

@@ -95,10 +95,12 @@ const state = {
   index: 0,
   selected: null,
   busy: false,
+  maintenance: null,
   deepseek: null,
   queueError: "",
   adapterError: "",
 };
+let watching = false;
 function group(stage) {
   if (["unknown", "failed", "interrupted"].includes(stage)) return "issue";
   if (["acknowledged", "replied"].includes(stage)) return "read";
@@ -214,7 +216,7 @@ function renderDesktops() {
         selected = previous[n]?.value ?? row.profileId;
       const button = (action, title, primary = false) =>
         '<button data-app="' + n + '" data-action="' + action + '" class="' +
-        (primary ? 'primary' : 'secondary') + '"' + (state.busy ? ' disabled' : '') + '>' + title + '</button>';
+        (primary ? 'primary' : 'secondary') + '"' + (state.busy || state.maintenance ? ' disabled' : '') + '>' + title + '</button>';
       const options = profiles.map(profile => '<option value="' + esc(profile.id) + '"' +
         (profile.id === selected ? ' selected' : '') + '>' + esc(profile.id) + '</option>').join('');
       const tone = phaseTone(n);
@@ -456,9 +458,10 @@ async function desktops() {
 }
 $("packages").onclick = async (e) => {
   const b = e.target.closest("button[data-action]");
-  if (!b || state.busy) return;
+  if (!b || state.busy || state.maintenance) return;
   const id = b.closest("article").querySelector("select").value;
   state.busy = true;
+  syncMaintenanceControls();
   renderDesktops();
   $("result").hidden = false;
   $("result").textContent = "正在处理…";
@@ -478,6 +481,7 @@ $("packages").onclick = async (e) => {
     $("result").textContent = err.message;
   } finally {
     state.busy = false;
+    syncMaintenanceControls();
     renderDesktops();
     $("result").hidden = !$("result").textContent;
   }
@@ -488,17 +492,38 @@ $("refresh").onclick = () => {
 };
 $("certify-form").onsubmit=async event=>{
   event.preventDefault();
-  if(state.busy)return;
+  if(state.busy || state.maintenance)return;
   state.busy=true;
+  syncMaintenanceControls();
   const form=event.currentTarget,button=form.querySelector("button");
   button.disabled=true;
   $("certify-result").textContent="正在准备测试会话并验收两端回执…";
   try {
     $("certify-result").textContent=await window.bridge.certify($("certify-app").value);
   } catch(e){$("certify-result").textContent=e.message;}
-  finally {button.disabled=false;state.busy=false;await desktops();}
+  finally {state.busy=false;syncMaintenanceControls();await desktops();}
 };
+function syncMaintenanceControls() {
+  const operation=state.maintenance;
+  const status=$("maintenance-status");
+  status.hidden=!operation;
+  status.textContent=operation ? "正在"+operation.label+"，开始于 "+
+    new Date(operation.startedAt).toLocaleTimeString("zh-CN",{hour12:false})+"。完成后可继续操作。" : "";
+  $("certify-form").querySelector("button").disabled=!!(state.busy || operation);
+  $("canary-watch").disabled=!!(watching || state.busy || operation);
+}
+async function maintenanceStatus() {
+  try {
+    const operation=await window.bridge.maintenance();
+    const changed=JSON.stringify(operation)!==JSON.stringify(state.maintenance);
+    state.maintenance=operation;
+    syncMaintenanceControls();
+    if(changed)renderDesktops();
+  } catch(e) {$("maintenance-status").hidden=false;$("maintenance-status").textContent="无法读取维护状态。"+e.message;}
+}
 async function watchStatus(change=false){
+  if(watching)return;
+  watching=true;
   const toggle=$("canary-watch");
   toggle.disabled=true;
   try{
@@ -507,10 +532,12 @@ async function watchStatus(change=false){
     const last=prefs.attempts[prefs.latest];
     $("canary-watch-status").textContent=last?[last.status,last.error,...Object.entries(last.packages||{}).map(([app,p])=>app+" "+(p.capabilities||[]).join(", ")+" · "+p.folder)].filter(Boolean).join(" · "):"";
   }catch(e){if(change)toggle.checked=!toggle.checked;$("canary-watch-status").textContent=e.message;}
-  finally{toggle.disabled=false;}
+  finally{watching=false;syncMaintenanceControls();}
 }
 $("canary-watch").onchange=()=>watchStatus(true);
 void watchStatus();
+void maintenanceStatus();
+setInterval(()=>{if(!document.hidden)void maintenanceStatus();},1000);
 setInterval(()=>{if(!document.hidden&&!$("canary-watch").disabled)void watchStatus();},30000);
 renderDesktops();
 page("home");

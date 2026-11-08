@@ -76,6 +76,14 @@ module.exports = function operations(config, req) {
           workspaceKind: "projectless",
           initialTitle: title,
           mode: "default",
+          collaborationMode: {
+            mode: "default",
+            settings: {
+              model: "gpt-6-luna",
+              reasoning_effort: "low",
+              developer_instructions: null,
+            },
+          },
           threadSource: "user",
           threadStartKind: "default",
           permissionsConfig: permissions("read-only"),
@@ -121,7 +129,10 @@ module.exports = function operations(config, req) {
         path.resolve(row.thread.cwd) !== path.resolve(cwd)
       )
         throw Error("Created Codex chat identity or workspace mismatch");
-      return { threadId: created, cwd };
+      const chat = manager.getConversation(created);
+      if (chat?.latestModel !== "gpt-6-luna" || chat?.latestReasoningEffort !== "low")
+        throw Error("Codex validation chat did not confirm Luna / low; inspect before retrying");
+      return { threadId: created, cwd, model: chat.latestModel, reasoningEffort: chat.latestReasoningEffort };
     }
     if (method === "permissions") {
       if (!created) throw Error("No disposable chat for permission test");

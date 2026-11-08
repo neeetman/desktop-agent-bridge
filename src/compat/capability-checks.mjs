@@ -31,25 +31,42 @@ export function generated(profile) {
     profile?.evidence?.stage,
   );
 }
-export function checkExecutionOperation(caps, method, input) {
+export function checkExecutionOperation(caps, method, input, allowFullAccess = false) {
   if (method === "read") return;
   const permitted =
     method === "set_permissions"
       ? caps.includes("permissions")
       : ["create", "prepare"].includes(method) && caps.includes("create");
+  const fullAccess = allowFullAccess && caps.includes("permissions") &&
+    input?.sandboxMode === "danger-full-access" && input.approvalPolicy === "never";
+  const restricted = input?.approvalPolicy === "on-request" && (
+    input.sandboxMode === "read-only" ||
+    (input.sandboxMode === "workspace-write" && caps.includes("permissions"))
+  );
   if (
     !permitted ||
-    !(
-      input?.sandboxMode === "read-only" ||
-      (input?.sandboxMode === "workspace-write" && caps.includes("permissions"))
-    ) ||
-    input.approvalPolicy !== "on-request" ||
+    !(fullAccess || restricted) ||
     input.writableRoots?.length
   )
     throw Object.assign(
       Error("Execution policy or operation outside the validated profile"),
       { code: "CAPABILITY_UNSUPPORTED", status: 503, dispatchNotStarted: true },
     );
+}
+
+export function verifyFullAccess(method, result) {
+  const native = method === "create" ? result.execution :
+    method === "set_permissions" ? result.nativeExecution : result;
+  const permissions = native?.nextTurnPermissions;
+  if (permissions?.sandboxMode !== "danger-full-access" ||
+      permissions.approvalPolicy !== "never" || permissions.writableRoots?.length) {
+    throw Object.assign(Error("Native Codex did not confirm full access with approvals disabled"), {
+      code: "EXECUTION_READBACK_MISMATCH",
+      status: 503,
+      createdThreadId: method === "create" ? result.threadId : undefined,
+    });
+  }
+  return result;
 }
 export async function probeCapabilities(app, call, checkBuild, save, creationEvidence) {
   const checks = {};
