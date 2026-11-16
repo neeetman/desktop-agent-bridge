@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { replaceFile, writeJson, readJson } from '../../src/lib/json-storage.mjs';
+import { replaceFile, writeJson, readJson, STARTUP_REPLACE } from '../../src/lib/json-storage.mjs';
 import { PeerRouter } from '../../src/mcp/peer-router.mjs';
 
 const refusal = code => Object.assign(new Error(code), { code });
@@ -48,4 +48,12 @@ test('a router whose state cannot be saved keeps running and retries later', () 
     router.save();
     assert.equal(router.saveFailure, null);
   } finally { fs.renameSync = original; clearTimeout(router.saveRetry); router.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('startup writes outlast refusals that exceed the normal retry budget', () => {
+  let calls = 0;
+  const rename = () => { if (++calls <= 20) throw refusal('EPERM'); };
+  assert.throws(() => replaceFile('a.tmp', 'a', { sleep: () => {}, rename }), { code: 'EPERM' });
+  calls = 0;
+  assert.equal(replaceFile('a.tmp', 'a', { ...STARTUP_REPLACE, sleep: () => {}, rename }), 21);
 });

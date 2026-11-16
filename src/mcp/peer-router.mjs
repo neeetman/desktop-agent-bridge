@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import {execFile} from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../core/contracts.mjs';
-import { writeJson } from '../lib/json-storage.mjs';
+import { writeJson, writeStartupJson } from '../lib/json-storage.mjs';
 import {publicResult,bridgeHeader,errorData} from '../core/collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
 import {canaryReceipt} from '../compat/canary-receipts.mjs';
@@ -521,7 +521,7 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
       }
     } catch (error) { const details=errorData(error,500);reply(details.httpStatus,{error:details.message,code:details.code,httpStatus:details.httpStatus,...(error.retryAfterSeconds?{retryAfterSeconds:error.retryAfterSeconds}:{})}); }
   };
-  atomic(path.join(router.directory, 'connection.json'), { baseUrl: `http://127.0.0.1:${server.address().port}`, token: router.state.token, pid: process.pid });
+  writeStartupJson(path.join(router.directory, 'connection.json'), { baseUrl: `http://127.0.0.1:${server.address().port}`, token: router.state.token, pid: process.pid });
   server.removeListener('request',initializing);server.on('request',handleRequest);
   router.healthTimer=setInterval(()=>{if(!Object.keys(router.state.healthSubscribers).length)return;for(const app of ['codex','claude','deepseek','antigravity'])void router.healthMonitor.probe(app).catch(()=>{});},30000);router.healthTimer.unref();
   router.callbackTimer=setInterval(()=>{for(const app of ['codex','claude','deepseek','antigravity'])void router.callbackForwarder.poll(app).catch(error=>{router.state.callbackErrors??={};router.state.callbackErrors[app]={code:error.code??'CALLBACK_FORWARD_FAILED',message:error.message,at:new Date().toISOString()};router.save();});},3000);router.callbackTimer.unref();

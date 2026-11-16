@@ -11,7 +11,7 @@ import { codexMcp } from '../adapters/codex/codex-mcp-control.mjs';
 import { lifecycle } from '../adapters/claude/claude-lifecycle.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
 import {activateProfile} from '../compat/native-management.mjs';
-import {writeJson} from '../lib/json-storage.mjs';
+import {writeJson,writeStartupJson} from '../lib/json-storage.mjs';
 
 const ROOT=fileURLToPath(projectURL(''));
 const DIRECTORY=sourcePath(ROOT,'runtime/supervisor');
@@ -258,7 +258,7 @@ else{
     return reply(404,{error:'Unknown supervisor endpoint'});
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(43131,'127.0.0.1',resolve);});
-  atomic(path.join(DIRECTORY,'connection.json'),{baseUrl:'http://127.0.0.1:43131',token,pid:process.pid});
+  writeStartupJson(path.join(DIRECTORY,'connection.json'),{baseUrl:'http://127.0.0.1:43131',token,pid:process.pid});
   record('supervisor.started',{pid:process.pid});await supervisor.tick();
   setInterval(()=>void supervisor.tick(),3000);
 }
