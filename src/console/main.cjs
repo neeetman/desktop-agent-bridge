@@ -8,6 +8,17 @@ const { createHash } = require("node:crypto");
 const root = app.isPackaged
   ? require("./package.json").bridgeRoot
   : path.resolve(__dirname, "../..");
+// The console is often started without a usable stdout/stderr (from a shell
+// that has exited, or a packaged build with no console). A failed write to them
+// must never surface as an uncaught "write EPIPE" dialog.
+for (const stream of [process.stdout, process.stderr]) stream?.on?.("error", () => {});
+const logFile = path.join(root, "runtime/console/console.log");
+function logLine(...parts) {
+  const line = new Date().toISOString() + " " + parts.map(String).join(" ") + "\n";
+  fs.mkdir(path.dirname(logFile), { recursive: true })
+    .then(() => fs.appendFile(logFile, line))
+    .catch(() => {});
+}
 const page = pathToFileURL(path.join(__dirname, "index.html")).href;
 const compatModule = (file) => import(pathToFileURL(path.join(root, "src/compat", file)).href);
 let window,
@@ -382,7 +393,7 @@ if (!app.requestSingleInstanceLock()) {
       }
       return prefs;
     });
-    const watchTick=()=>checkUnknown().catch(e=>console.error("Automatic compatibility check:",e.message));
+    const watchTick=()=>checkUnknown().catch(e=>logLine("Automatic compatibility check:",e.message));
     setInterval(watchTick,60000).unref();
     void watchTick();
     bind("copy", (value) => {
