@@ -9,7 +9,7 @@ import { normalizeExecution, nativeModelArgs, queryThreads, EFFORTS, canonicalJs
 import { Signals } from './signals.mjs';
 import {publicResult,errorData} from './collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
-import {invalidJson,readJson,writeJson} from '../lib/json-storage.mjs';
+import {invalidJson,readJson,writeJson,writeStartupJson} from '../lib/json-storage.mjs';
 import {requireNewRecoveryKey} from './recovery-keys.mjs';
 
 const terminal = new Set(['completed', 'failed', 'interrupted', 'attention']);
@@ -66,7 +66,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     // Compatibility bindings need credentials before the first native probe.
     // Do not publish a PID/address until the service has actually started.
     save();
-    writeJson(path.join(stateDir, 'connection.json'), { token: state.token, initializing: true });
+    writeStartupJson(path.join(stateDir, 'connection.json'), { token: state.token, initializing: true });
     try { await preflight(); }
     catch (error) {
       if (error.code !== 'BUILD_UNSUPPORTED' && !(error.status===503&&error.dispatchNotStarted)) { tools.close(); throw error; }
@@ -439,7 +439,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     } catch (error) { if (!res.headersSent) {const details=errorData(error,502);json(res,details.httpStatus,{...details,error:details.message});} else res.end(); }
   };
   baseUrl = `http://127.0.0.1:${server.address().port}`;
-  writeJson(path.join(stateDir, 'connection.json'), { baseUrl, token: state.token, pid: process.pid, callerThread: tools.callerThread, backend: state.provider });
+  writeStartupJson(path.join(stateDir, 'connection.json'), { baseUrl, token: state.token, pid: process.pid, callerThread: tools.callerThread, backend: state.provider });
   for (const item of Object.values(state.watches)) callback(item.threadId);
   // Only unfinished tasks can still report back; refreshing credentials for every
   // historical task recreated hundreds of callback files on each start.

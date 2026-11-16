@@ -41,7 +41,8 @@ test('separate destinations progress concurrently, one destination stays ordered
     assert.deepEqual(router.receive(sourceA).messages.map(row => [row.replyTo, row.text]), [[a.id, 'ACK_A']]);
     assert.deepEqual(router.receive(sourceB).messages.map(row => [row.replyTo, row.text]), [[c.id, 'ACK_C']]);
     assert.equal(sent.filter(row => row.route === '/v1/threads/claude-a/messages').length, 2);
-    const secondTask = `task-${sent.findIndex(row => row.body.prompt.includes('\nsecond\n'))}`;
+    // Match the text line itself: whether a guide line follows depends on the installed skill.
+    const secondTask = `task-${sent.findIndex(row => row.body.prompt.split('\n').includes('second'))}`;
     pending.shift()(); await second;
     turnByThread.set(b.to.threadId,'turn-B');await router.acknowledge({from:b.to,messageId:b.id});tasks.set(secondTask, { status: 'completed', result: 'ACK_B',turnId:'turn-B' }); await tick();
     assert.deepEqual(router.receive(sourceB).messages.map(row => [row.replyTo, row.text]), [[c.id, 'ACK_C'], [b.id, 'ACK_B']]);

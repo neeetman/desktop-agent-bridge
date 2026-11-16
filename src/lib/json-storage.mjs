@@ -43,6 +43,13 @@ export function replaceFile(temporary, file, { attempts = 8, sleep = ms => Atomi
   }
 }
 
+// Startup writes (connection files that every client reads constantly) happen
+// before a service accepts requests, so a long blocking retry is harmless there.
+export const STARTUP_REPLACE = { attempts: 40 };
+export function writeStartupJson(file, value) {
+  return writeJson(file, value, STARTUP_REPLACE);
+}
+
 export function writeJson(file, value, options) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.${randomUUID()}.tmp`;
