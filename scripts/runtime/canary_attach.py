@@ -42,7 +42,11 @@ def attach(data):
             # A second-instance notification wakes Node-API in an idle desktop.
             # This is only used during a user-triggered live validation.
             subprocess.Popen([exe], creationflags=subprocess.CREATE_NO_WINDOW)
-        if not event.wait(40):
+        # Codex 26.1111 makes no Node-API calls while idle, and neither focus nor
+        # a second instance wakes it. Wait for its next native work instead
+        # (opening or switching a chat).
+        wait = 40 if app == 'claude' else max(40, int(data.get('callbackWaitMs', 40000)) / 1000)
+        if not event.wait(wait):
             raise RuntimeError(app + ' native callback timed out: ' + str(errors[-1:] or 'no Node-API callback'))
     finally:
         session.detach()

@@ -6,6 +6,11 @@ import { ROOT, readJson } from "./compatibility.mjs";
 import attach from "./canary-native.cjs";
 import operations from "./canary-operations.cjs";
 
+// An idle Codex runs no Node-API callback until its next native work, such as
+// opening or switching a chat, so its attachment waits longer than Claude's.
+const CODEX_CALLBACK_WAIT_MS =
+  Number(process.env.DESKTOP_BRIDGE_CODEX_CALLBACK_WAIT_MS) || 10 * 60 * 1000;
+
 export async function openChannel(candidate, threadId, runId, duration) {
   const token = randomBytes(24).toString("hex"),
     pending = new Map(),
@@ -96,6 +101,7 @@ export async function openChannel(candidate, threadId, runId, duration) {
     JSON.stringify({
       build: candidate.build,
       adapterRoot: candidate.adapterRoot,
+      callbackWaitMs: app === "codex" ? CODEX_CALLBACK_WAIT_MS : 40000,
       code: "(" + attach.toString() + ")(" + JSON.stringify(config) + ","+operations.toString()+")",
     }),
   );
@@ -106,7 +112,7 @@ export async function openChannel(candidate, threadId, runId, duration) {
   };
   const timeout = setTimeout(
     () => fail(Error("Desktop validation channel timed out")),
-    50000,
+    (app === "codex" ? CODEX_CALLBACK_WAIT_MS : 40000) + 10000,
   );
   try {
     await ready;
