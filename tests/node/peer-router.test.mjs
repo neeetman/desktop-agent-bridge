@@ -33,6 +33,23 @@ test('known-unsent adapter waits respect TTL; uncertain writes are not expired o
  }finally{f.close();}
 });
 
+test('a recovered key conflict is terminal and is never queued for another dispatch', async () => {
+ const f=fixture();
+ let attempts=0;
+ try {
+  const message=await f.router.send({from,to,text:'historical input'});
+  f.router.backendRequest=async(app,route,method,...rest)=>{
+   if(method!=='POST')return f.backendRequest(app,route,method,...rest);
+   attempts++;
+   throw Object.assign(Error('Historical key is reserved'),{status:409,code:'RECOVERED_KEY_RESERVED'});
+  };
+  await f.tick();
+  await f.tick();
+  assert.equal(attempts,1);
+  assert.equal(f.router.state.jobs[message.id].status,'unknown');
+ } finally { f.close(); }
+});
+
 test('reply-requesting inputs do not read the recipient or wait for a turn; receipts survive restart',async()=>{
  const f=fixture();let sends=0;const backend=async(app,route,method,body)=>{
   if(route.endsWith('/settings'))return {settings:{}};

@@ -188,6 +188,36 @@ module.exports = function operations(config, req) {
         restored: "read-only",
       };
     }
+    if (method === "fullAccess") {
+      guard(config.threadId ?? created);
+      once(method);
+      workspace();
+      const full = { sandboxMode: "danger-full-access", approvalPolicy: "never", writableRoots: [] };
+      const native = policy.nativePermissions(full, cwd);
+      const result = await manager.startConversation({
+        input: [], cwd, workspaceRoots: [cwd], workspaceKind: "projectless",
+        initialTitle: title + " full access", mode: "default", threadSource: "user",
+        threadStartKind: "default", permissionsConfig: native, config: policy.nativeConfig(full),
+      }, { readThreadCreationInputs: async () => ({
+        hasDesktopRuntime: true, hasLocalRuntime: true, hasDeveloperInstructions: true,
+        isBrowserRuntime: false, usesDesktopMcp: manager.settings.usesDesktopMcp,
+        readDynamicTools: manager.settings.readDynamicTools, sidebarSectionToolsEnabled: true, everydayWork: false,
+      }) });
+      if (result.status !== "created" || !result.conversationId || result.conversationId === created)
+        throw Error("Unexpected full-access creation result");
+      const id = result.conversationId;
+      const row = await manager.readThread(id, { includeTurns: false });
+      if (row.thread?.id !== id || path.resolve(row.thread.cwd) !== path.resolve(cwd))
+        throw Error("Full-access chat identity or workspace mismatch");
+      const resumed = await manager.resumeConversation({ conversationId:id, cwd, workspaceRoots:[cwd],
+        model:null, reasoningEffort:null, permissions:native, collaborationMode:null },
+        { readResumeInputs: async ({model,cwd}) => manager.settings.readSettings(model,cwd) });
+      if (resumed.status === "not-ready") throw Error("Full-access chat could not resume");
+      const settings = manager.getConversation(id)?.latestThreadSettings;
+      if (settings?.sandboxPolicy?.type !== "dangerFullAccess" || settings.approvalPolicy !== "never")
+        throw Error("Full-access creation settings could not be read back");
+      return { threadId:id, cwd, sandboxMode:"danger-full-access", approvalPolicy:"never" };
+    }
     if (method === "mcp") {
       guard(null, true);
       const threadId = config.threadId ?? created;

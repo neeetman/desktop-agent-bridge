@@ -19,7 +19,7 @@ export async function executionRpc(method,params={}){
  return withCapability('codex','execution',selection=>{
    if(selection.profile.coreApiVersion===2){
      const input=method==='prepare'?policy.loadState().threads[params.threadId]:params.args??params.policy;
-     checkExecutionOperation(selection.profile.capabilities,method,input);
+     checkExecutionOperation(selection.effectiveCapabilities??selection.profile.capabilities,method,input);
    }
    return executionWire(method,{...params,binding:selection.binding,expiresAt:Date.now()+90000});
  });

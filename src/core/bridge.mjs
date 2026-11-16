@@ -9,6 +9,8 @@ import { normalizeExecution, nativeModelArgs, queryThreads, EFFORTS, canonicalJs
 import { Signals } from './signals.mjs';
 import {publicResult,errorData} from './collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
+import {invalidJson,readJson,writeJson} from '../lib/json-storage.mjs';
+import {requireNewRecoveryKey} from './recovery-keys.mjs';
 
 const terminal = new Set(['completed', 'failed', 'interrupted', 'attention']);
 const active = new Set(['prepared', 'dispatching', 'running', 'unknown', 'awaiting_decision', 'resuming']);
@@ -21,12 +23,6 @@ function reportTask(task){
     return {...task,code:task.errorCode,dispatchNotStarted:true,dispatchStage:'notStarted'};
   if(!task.cachedResult||!['failed','unknown'].includes(task.status))return task;
   return {...task,code:task.status==='unknown'?'CACHED_TASK_OUTCOME_UNKNOWN':'CACHED_TASK_FAILURE',httpStatus:409,originalError:task.error,error:`Stored ${task.status} result for task ${task.id}, created at ${task.createdAt}. This request was not executed again. Inspect the original outcome before using a new idempotency key. Original error: ${task.error??'unavailable'}`,retrySafe:task.dispatchOutcome==='not-started'};
-}
-
-function writeJson(file, value) {
-  const tmp = `${file}.${crypto.randomUUID()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, file);
 }
 
 async function body(req) {
@@ -49,9 +45,22 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
   try {
   fs.mkdirSync(stateDir, { recursive: true });
   const stateFile = path.join(stateDir, 'state.json');
-  const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, 'utf8')) : {
-    schemaVersion: 1, token: crypto.randomBytes(32).toString('hex'), tasks: {}, watches: {}, idempotency: {},
-  };
+  const missing = Symbol('missing state');
+  const saved = readJson(stateFile, missing);
+  const state = saved === missing
+    ? { schemaVersion: 1, token: crypto.randomBytes(32).toString('hex'), tasks: {}, watches: {}, idempotency: {} }
+    : saved;
+  if (!state || state.schemaVersion !== 1 || typeof state.token !== 'string' || !state.token ||
+      ![state.tasks, state.watches, state.idempotency].every(row => row && typeof row === 'object' && !Array.isArray(row)))
+    throw invalidJson(stateFile);
+  const journal = path.join(stateDir, 'events.jsonl');
+  const journalText = fs.existsSync(journal) ? fs.readFileSync(journal, 'utf8') : '';
+  let events;
+  try {
+    events = journalText.trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+  } catch {
+    throw invalidJson(journal);
+  }
   const save = () => writeJson(stateFile, state);
   if (preflight) {
     // Compatibility bindings need credentials before the first native probe.
@@ -73,13 +82,11 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
   // A crash during native dispatch must never lead to an automatic duplicate send.
   for (const task of Object.values(state.tasks)) if (['prepared', 'dispatching'].includes(task.status)) task.status = 'unknown';
   save();
-  const journal = path.join(stateDir, 'events.jsonl');
-  const events = fs.existsSync(journal) ? fs.readFileSync(journal, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
-  let nextEvent = (events.at(-1)?.id ?? 0) + 1;
+  let nextEvent = Math.max(events.at(-1)?.id ?? 0, state.recovery?.eventFloor ?? 0) + 1;
   const streams = new Set();
   const emit = (type, data) => {
     const event = { id: nextEvent++, time: new Date().toISOString(), type, ...data };
-    fs.appendFileSync(journal, `${JSON.stringify(event)}\n`, { mode: 0o600 });
+    fs.appendFileSync(journal, `${JSON.stringify(event)}\n`, { mode: 0o600, flush: true });
     events.push(event);
     for (const stream of streams) if (!stream.write(`id: ${event.id}\nevent: ${type}\ndata: ${JSON.stringify(event)}\n\n`)) stream.destroy();
     return event;
@@ -110,11 +117,13 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     const key = `${hostId}:${threadId}`;
     state.watches[key] ??= { threadId, hostId, seen: {}, lastStatus: null };
     if(explicit)state.watches[key].explicit=true;
+    delete state.watches[key].recoveryPaused;
     save();
     return { ...state.watches[key], callback: callback(threadId) };
   }
   const refreshing = new Set();
   async function refresh(watchState) {
+    if(watchState.recoveryPaused)return;
     const tracked=Object.values(state.tasks).filter(task=>task.threadId===watchState.threadId&&task.hostId===watchState.hostId);
     // Keep explicit watches and streams, but retire automatic polling once a
     // tracked task ends. Historical chats otherwise saturate native transports.
@@ -199,6 +208,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     const fingerprint = crypto.createHash('sha256').update(canonicalJson(input)).digest('hex');
     if (idempotencyKey && state.idempotency[idempotencyKey]) {
       const record = state.idempotency[idempotencyKey];
+      if (record.recovered) throw Object.assign(fail(409, `Request key is reserved by ledger recovery. Inspect task ${record.taskId} before taking any further action.`), {
+        code: 'RECOVERED_KEY_RESERVED', dispatchNotStarted: true,
+      });
       const expected = record.fingerprintVersion === 2 ? fingerprint : crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex');
       if (record.fingerprint !== expected) throw fail(409, 'Idempotency-Key already used with a different request');
       if (record.fingerprintVersion !== 2) { record.fingerprintVersion = 2; record.fingerprint = fingerprint; save(); }
@@ -208,6 +220,10 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     // Historical peerNotification is now the delivery-only transport for all
     // peer inputs. It must never mutate the conversation's execution settings.
     const notification=input.peerNotification===true&&input.callbackMode==='peer'&&!!input.threadId;
+    // The intact router owns this namespace and retains its complete set of
+    // historical message IDs. Recovery reserved those IDs before restarting.
+    const routerInput = notification && /^peer-router:[0-9a-f-]{36}$/.test(idempotencyKey ?? '');
+    if (!routerInput && !internal.freshDecision) requireNewRecoveryKey(state.recovery, idempotencyKey);
     if(notification&&['model','effort','thinking','cwd','sandboxMode','approvalPolicy','writableRoots','projectId','workspaceId','environment','target'].some(key=>input[key]!==undefined))
       throw fail(400,'Peer input delivery preserves native settings; update execution settings separately');
     if(tools.preflightDispatch)await tools.preflightDispatch(input);
@@ -317,7 +333,7 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
     let continuation;
     try {
       continuation = await dispatch({ threadId, hostId, prompt: input.peerDecisionId?nonempty(input.context,'context'):`已选择「${input.answer}」，请继续原任务。`,callbackMode:input.callbackMode,
-        model: input.model ?? parent?.execution?.model, effort: input.effort ?? input.thinking ?? parent?.execution?.effort }, `decision:${decision.id}`, { resumesTaskId: parent?.id, operation: 'decision_resume' });
+        model: input.model ?? parent?.execution?.model, effort: input.effort ?? input.thinking ?? parent?.execution?.effort }, `decision:${decision.id}`, { resumesTaskId: parent?.id, operation: 'decision_resume', freshDecision: decision.createdAt >= state.recovery?.at });
     } catch (error) {
       decision.status = 'pending'; if (parent) { parent.status = 'awaiting_decision'; parent.pendingDecisionId = decision.id; }
       save(); throw error;

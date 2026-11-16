@@ -6,13 +6,13 @@ import {generated,certifiedCapabilities} from './capability-checks.mjs';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import {fileURLToPath} from 'node:url';
+import {readJson,writeJson as atomicJson} from '../lib/json-storage.mjs';
 
 export const ROOT=fileURLToPath(projectURL(''));
 const run=promisify(execFile);
 const digest=value=>crypto.createHash('sha256').update(value).digest('hex');
 const canonical=value=>JSON.stringify(value,(_,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b))):v);
-export const readJson=(file,fallback)=>{try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch(e){if(e.code==='ENOENT'&&fallback!==undefined)return fallback;throw e;}};
-export function atomicJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});const tmp=file+'.'+crypto.randomUUID()+'.tmp';fs.writeFileSync(tmp,JSON.stringify(value,null,2)+'\n',{mode:0o600});fs.renameSync(tmp,file);}
+export {readJson,atomicJson};
 export function compatError(code,message,extra={}){return Object.assign(new Error(message),{code,status:503,dispatchNotStarted:true,dispatchStage:'notStarted',...extra});}
 export function adapterDigest(root,files){return digest(canonical(Object.fromEntries([...files].sort().map(file=>[file,digest(fs.readFileSync(safeFile(root,file)))]))));}
 function safeFile(root,name){if(typeof name!=='string'||path.isAbsolute(name)||name.includes('\\')||name.split('/').some(x=>['..','.',''].includes(x)))throw compatError('INVALID_PROFILE','Unsafe package path');const file=sourcePath(root,name);if(!file.startsWith(path.resolve(root)+path.sep))throw compatError('INVALID_PROFILE','Path escapes package');if(fs.existsSync(file)&&!fs.realpathSync(file).startsWith(fs.realpathSync(root)+path.sep))throw compatError('INVALID_PROFILE','Package symlink escapes its root');return file;}
@@ -26,7 +26,7 @@ export function validateProfile(profile){
   if(!Array.isArray(profile.adapterFiles)||!profile.adapterFiles.length||!Array.isArray(profile.capabilities)||!profile.capabilities.length||!profile.manifests||!profile.evidence?.baseline)throw compatError('INVALID_PROFILE','Profile lacks adapter, capabilities, manifests or evidence');
   if(!/^[a-f0-9]{64}$/.test(profile.adapterDigest??''))throw compatError('INVALID_PROFILE','Invalid adapter digest');
   for(const key of profile.app==='codex'?['executableSha256','chromeSha256','asarSha256']:['executableSha256','asarSha256'])if(!/^[a-f0-9]{64}$/.test(profile.hashes?.[key]??''))throw compatError('INVALID_PROFILE','Invalid desktop hash');
-  const allowed=expanded?['read','send','create','permissions','mcp']:profile.app==='codex'?['read','send','settings','execution','mcp']:['read','send','identity'];
+  const allowed=expanded?['read','send','create','permissions','fullAccess','mcp']:profile.app==='codex'?['read','send','settings','execution','mcp']:['read','send','identity'];
   if(profile.capabilities.some(item=>!allowed.includes(item))||new Set(profile.capabilities).size!==profile.capabilities.length)throw compatError('INVALID_PROFILE','Unknown or duplicate capability');
   for(const file of profile.adapterFiles)safeFile(ROOT,file);
   for(const manifest of Object.values(profile.manifests))for(const [key,value] of Object.entries(profile.hashes))if(manifest[key]!==value)throw compatError('INVALID_PROFILE','Manifest/profile desktop hashes disagree');
@@ -58,7 +58,7 @@ export const desktopInventory=coalesceInventory(async()=>{
 });
 export class Compatibility {
   constructor(root=ROOT,{inventory=desktopInventory,now=Date.now,alive}={}){this.root=path.resolve(root);this.directory=path.join(this.root,'runtime/updates');this.file=path.join(this.directory,'state.json');this.inventory=inventory;this.now=now;this.alive=alive??(pid=>{try{process.kill(pid,0);return true;}catch{return false;}});}
-  state(){const value=readJson(this.file,{schemaVersion:1,apps:{},leases:{},journal:[]});if(value.schemaVersion!==1||!value.apps||!value.leases||!Array.isArray(value.journal))throw compatError('STATE_SCHEMA_UNSUPPORTED','Compatibility state schema is unsupported; no state was changed');return value;}
+  state(){const value=readJson(this.file,{schemaVersion:1,apps:{},leases:{},journal:[]});if(value?.schemaVersion!==1||!value.apps||!value.leases||!Array.isArray(value.journal))throw compatError('STATE_SCHEMA_UNSUPPORTED','Compatibility state schema is unsupported; no state was changed');return value;}
   async locked(fn){
     fs.mkdirSync(this.directory,{recursive:true});let python='python';try{python=readJson(path.join(this.root,'runtime/supervisor/config.json')).python??python;}catch{}
     const child=spawn(python,[sourcePath(ROOT,'coordinator-lock.py'),path.join(this.directory,'coordinator.lock')],{windowsHide:true,stdio:['pipe','pipe','pipe']});let acquired=false;
@@ -82,6 +82,19 @@ export class Compatibility {
         row.profile={...row.profile,revoked:true};
     }
     return rows;
+  }
+  effectiveCapabilities(selected){
+    const capabilities=[...selected.profile.capabilities];
+    if(selected.profile.app!=='codex'||capabilities.includes('fullAccess'))return capabilities;
+    const matching=this.profiles().find(({profile,adapterRoot})=>
+      !profile.revoked && profile.app==='codex' && profile.capabilities.includes('fullAccess') &&
+      profile.evidence?.stage==='capability-verified' &&
+      canonical(profile.hashes)===canonical(selected.profile.hashes) &&
+      canonical(profile.manifests.execution)===canonical(selected.profile.manifests.execution) &&
+      profile.adapterDigest===selected.profile.adapterDigest &&
+      adapterDigest(adapterRoot,profile.adapterFiles)===profile.adapterDigest);
+    if(matching)capabilities.push('fullAccess');
+    return capabilities;
   }
   pin(selected){
     const hash=digest(canonical(selected.profile)),target=path.join(this.directory,'packages',hash),adapterRoot=path.join(target,'adapter');
@@ -149,7 +162,7 @@ export class Compatibility {
       selected=this.pin(selected);
       const row={...old,...selected,circuits:changed?{}:old.circuits??{},profileId:selected.profile.id,binding,credentialDigest,credentialEpoch,activationEpoch,phase:changed?'selected':old.phase==='blocked'?'selected':old.phase??'selected',blockedReason:null};
       state.apps[app]=row;
-      const result={app,...selected,binding};
+      const result={app,...selected,binding,effectiveCapabilities:this.effectiveCapabilities(selected)};
       if(lease){result.leaseId=crypto.randomUUID();state.leases[result.leaseId]={app,pid:process.pid,createdAt:this.now(),expiresAt:this.now()+120000,binding};}
       if(probing){result.readProbe=true;row.circuits.read={...circuit,lastProbeAt:new Date(this.now()).toISOString(),probeLeaseId:result.leaseId};}
       this.save(state,changed?{app,event:'selection',profileId:row.profileId,generation:row.generation,activationEpoch}:undefined);return result;
@@ -170,7 +183,15 @@ export class Compatibility {
   async report(app,binding,phase,details={}){return this.locked(()=>{const state=this.state(),row=state.apps[app];if(!row||row.phase==='blocked'||row.transition||canonical(row.binding)!==canonical(binding))throw compatError('CONFIG_EPOCH_CHANGED','Stale helper observation rejected');row.phase=phase;row.probe={at:new Date(this.now()).toISOString(),...details};row.helperProbes??={};row.helperProbes[details.kind??'monitor']=row.probe;this.save(state);return {reported:true};});}
   async doctor(app){
     const inventory=await this.inventory(),state=this.state();const apps={};
-    for(const name of app?[app]:['codex','claude']){try{const row=this.evaluate(name,inventory,state);apps[name]={runningBuild:row.runningBuild,installedBuild:row.installedBuild,profileId:row.profile.id,profileDigest:row.profileDigest,adapterDigest:row.profile.adapterDigest,capabilities:row.profile.capabilities,phase:state.apps[name]?.phase??'notAttached',probe:state.apps[name]?.probe??null,circuits:state.apps[name]?.circuits??{},transition:state.apps[name]?.transition??null};}catch(error){apps[name]={phase:'blocked',installedBuild:inventory.installed.find(row=>row.app===name)??null,runningBuild:error.runningBuild??null,code:error.code??'DIAGNOSTIC_ERROR',error:error.message};}}
+    for(const name of app?[app]:['codex','claude']){
+      try {
+        const row=this.evaluate(name,inventory,state),previous=state.apps[name];
+        const current=previous?.generation===row.generation&&previous.profileDigest===row.profileDigest?previous:null;
+        apps[name]={runningBuild:row.runningBuild,installedBuild:row.installedBuild,profileId:row.profile.id,profileDigest:row.profileDigest,adapterDigest:row.profile.adapterDigest,capabilities:this.effectiveCapabilities(row),phase:current?.phase??'notAttached',probe:current?.probe??null,circuits:current?.circuits??{},transition:current?.transition??null};
+      } catch(error) {
+        apps[name]={phase:'blocked',installedBuild:inventory.installed.find(row=>row.app===name)??null,runningBuild:error.runningBuild??null,code:error.code??'DIAGNOSTIC_ERROR',error:error.message};
+      }
+    }
     const workerDirectory = path.join(this.root,'runtime/router/mcp-workers');
     const workers = [];
     if (fs.existsSync(workerDirectory)) {

@@ -327,7 +327,7 @@ export class PeerRouter {
         // Only an explicitly linked callback answer resumes a tracked task.
         task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined,peerNotification:true }, `peer-router:${message.id}`);
       } catch (error) {
-        if (error.code === 'CACHED_TASK_OUTCOME_UNKNOWN' || error.code === 'CACHED_TASK_FAILURE') {
+        if (['CACHED_TASK_OUTCOME_UNKNOWN', 'CACHED_TASK_FAILURE', 'RECOVERED_KEY_RESERVED', 'RECOVERY_KEY_REQUIRED'].includes(error.code)) {
           job.status = message.status = error.code === 'CACHED_TASK_FAILURE' ? 'failed' : 'unknown';
           job.error = error.message; this.save(); return;
         }

@@ -46,6 +46,31 @@ function fixture(){
  return {base,root,appdir,profile,manager,update,inventory:()=>inventory,setInventory:value=>{inventory=value;},tick:value=>{now+=value;},close:()=>fs.rmSync(base,{recursive:true,force:true})};
 }
 test('passive doctor verifies bytes without creating installation/state or exposing credentials',async()=>{const f=fixture();try{const before=fs.readdirSync(path.join(f.root,'runtime'));const result=await f.manager.doctor('codex');assert.equal(result.apps.codex.profileId,'test-v1');assert.equal(result.apps.codex.installedBuild.version,'2.0.0');assert.equal(result.apps.codex.runningBuild.packageVersion,'1.0.0');assert.deepEqual(fs.readdirSync(path.join(f.root,'runtime')),before);assert.ok(!JSON.stringify(result).includes('fixture-secret'));}finally{f.close();}});
+test('doctor names corrupt state without exposing its contents or rewriting it', async () => {
+ const f=fixture();
+ try {
+  const damaged=Buffer.from('\0private-fragment');
+  fs.mkdirSync(f.manager.directory,{recursive:true});
+  fs.writeFileSync(f.manager.file,damaged);
+  await assert.rejects(f.manager.doctor('codex'), error =>
+    error.code==='STATE_JSON_INVALID' && error.dispatchNotStarted &&
+    error.message.includes(f.manager.file) && !error.message.includes('private-fragment'));
+  assert.deepEqual(fs.readFileSync(f.manager.file),damaged);
+ } finally { f.close(); }
+});
+test('doctor does not report a previous process as attached', async () => {
+ const f=fixture();
+ try {
+  const selected=await f.manager.resolve('codex','read');
+  await f.manager.report('codex',selected.binding,'attached');
+  assert.equal((await f.manager.doctor('codex')).apps.codex.phase,'attached');
+  f.inventory().processes[0].createdAt='after-reboot';
+  const app=(await f.manager.doctor('codex')).apps.codex;
+  assert.equal(app.profileId,'test-v1');
+  assert.equal(app.phase,'notAttached');
+  assert.equal(app.probe,null);
+ } finally { f.close(); }
+});
 test('same PID recovers after unsupported hashes are added; capability revocation is immediately enforced',async()=>{const f=fixture();try{f.update({hashes:{...f.profile.hashes,executableSha256:sha('wrong')},manifests:{execution:{...f.profile.hashes,executableSha256:sha('wrong')}}});await assert.rejects(f.manager.resolve('codex','read'),{code:'BUILD_UNSUPPORTED'});f.update({hashes:{...f.profile.hashes,executableSha256:sha('exe')},manifests:{execution:{...f.profile.hashes,executableSha256:sha('exe')}}});const result=await f.manager.resolve('codex','send');assert.equal(result.runningBuild.pid,101);f.update({revoked:true});await assert.rejects(f.manager.resolve('codex','read'),{code:'PROFILE_REVOKED'});}finally{f.close();}});
 test('PID reuse changes generation; same-process replacement of bytes requires restart',async()=>{const f=fixture();try{const first=await f.manager.resolve('codex','read');f.inventory().processes[0].createdAt='second';const next=await f.manager.resolve('codex','read');assert.notEqual(first.binding.generation,next.binding.generation);fs.writeFileSync(path.join(f.appdir,'resources/app.asar'),'changed in place');await assert.rejects(f.manager.resolve('codex','read'),{code:'AWAITING_RESTART'});}finally{f.close();}});
 test('ctime-only changes rehash native files without replacing bindings; changed bytes still require restart',async()=>{

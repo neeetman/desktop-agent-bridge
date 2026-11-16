@@ -4,6 +4,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { apiError, canonicalJson } from './contracts.mjs';
+import { requireNewRecoveryKey } from './recovery-keys.mjs';
 
 const nonempty = (value, name) => { if (typeof value !== 'string' || !value.trim()) throw apiError(400, `${name} must be nonempty`); };
 const same = (a, b) => { const x = Buffer.from(a ?? ''), y = Buffer.from(b ?? ''); return x.length === y.length && crypto.timingSafeEqual(x, y); };
@@ -73,6 +74,9 @@ export class Signals {
       if (record.fingerprint && record.fingerprint !== fingerprint) throw apiError(409, 'messageId already used for a different signal');
       return record;
     }
+    const recovery = this.state.recovery;
+    if (recovery && (data.taskId ? task?.createdAt < recovery.at : recovery.legacyWatches?.includes(threadId)))
+      requireNewRecoveryKey(recovery, data.messageId);
     const kind = data.kind ?? 'message';
     if (!['message', 'progress', 'finding', 'blocker', 'decision'].includes(kind)) throw apiError(400, 'Unsupported signal kind');
     const attribution = { threadId: threadId ?? null, taskId: task?.id ?? null, messageId: data.messageId, credential: root ? 'controller' : 'session',peerOrigin:task?.peerOrigin??null,taskVersion:task?.taskVersion??null };

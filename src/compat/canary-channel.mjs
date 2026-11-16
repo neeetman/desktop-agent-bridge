@@ -124,7 +124,7 @@ export async function openChannel(candidate, threadId, runId, duration) {
       return await new Promise((resolve, reject) => {
         timer = setTimeout(
           () => reject(Error("Validation " + method + " timed out")),
-          ["create","permissions","mcp"].includes(method)?85000:18000,
+          ["create","permissions","fullAccess","mcp"].includes(method)?85000:18000,
         );
         pending.set(id, { resolve, reject });
         socket.write(JSON.stringify({ id, method, text }) + "\n");
