@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import {execFile} from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { canonicalJson } from '../core/contracts.mjs';
+import { writeJson } from '../lib/json-storage.mjs';
 import {publicResult,bridgeHeader,errorData} from '../core/collaboration.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
 import {canaryReceipt} from '../compat/canary-receipts.mjs';
@@ -26,7 +27,7 @@ export function crossApp(from, to) {
 const text = (value, field) => { if (typeof value !== 'string' || !value.trim()) throw bad(400, `${field} is required`); return value; };
 const address = value => { if (!value || !['codex', 'claude', 'deepseek', 'antigravity'].includes(value.app)) throw bad(400, 'Address requires app=codex|claude|deepseek|antigravity'); text(value.threadId, 'threadId'); return { app: value.app, threadId: value.threadId }; };
 const equal = (a, b) => a.app === b.app && a.threadId === b.threadId;
-const atomic = (file, value) => { const temporary = `${file}.tmp`; fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600, flush:true }); fs.renameSync(temporary, file); };
+const atomic = (file, value) => writeJson(file, value);
 
 export class PeerRouter {
   constructor({ directory = sourcePath(ROOT, 'runtime/router'), backendRequest, pollMs = 1000, healthOptions = {}, delegationPath = delegationFile } = {}) {
@@ -47,7 +48,18 @@ export class PeerRouter {
     this.healthMonitor=new HealthMonitor({...healthOptions,initial:this.state.health,request:(...args)=>this.backendRequest(...args),onResult:(row,transition)=>this.recordHealth(row,transition)});
     this.timer = setInterval(() => void this.tick(), pollMs); this.timer.unref(); this.save();
   }
-  save() { atomic(this.stateFile, this.state); }
+  // Background timers call save(); a write refused even after retries must not
+  // crash the router. State stays in memory and the next save retries.
+  save() {
+    try {
+      atomic(this.stateFile, this.state);
+      if (this.saveFailure) { console.error(`router state saved after ${this.saveFailure.count} failed attempt(s)`); this.saveFailure = null; }
+    } catch (error) {
+      this.saveFailure = { code: error.code ?? 'SAVE_FAILED', count: (this.saveFailure?.count ?? 0) + 1, at: new Date().toISOString() };
+      console.error(`router state save failed (${this.saveFailure.code}, attempt ${this.saveFailure.count}); retrying`);
+      if (!this.saveRetry) { this.saveRetry = setTimeout(() => { this.saveRetry = null; this.save(); }, 2000); this.saveRetry.unref?.(); }
+    }
+  }
   async nativeRequest(app, route, method = 'GET', body, key, options = {}) {
     const file = sourcePath(ROOT, { codex: 'runtime/connection.json', claude: 'runtime/claude/connection.json', deepseek: 'runtime/deepseek/connection.json', antigravity: 'runtime/antigravity/connection.json' }[app] ?? 'invalid-app');
     const unavailable = () => {
