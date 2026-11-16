@@ -35,6 +35,7 @@ const appName = (id) => meta(id).name;
 const CAPS = [
   ["read", "读取"], ["send", "发送"], ["create", "创建会话"], ["permissions", "权限切换"], ["fullAccess", "完全访问"], ["mcp", "MCP"],
 ];
+const CODEX_ONLY = ["permissions", "fullAccess"];
 const capLabel = (name) => CAPS.find(([key]) => key === name)?.[1] ?? name;
 const CHECK_STATUS = { passed: "已通过", deferred: "已推迟", unsupported: "不支持", failed: "未通过" };
 const CHECK_VERB = { deferred: "推迟了", unsupported: "判定不支持", failed: "未通过" };
@@ -135,7 +136,10 @@ function appIds() {
 function capabilityStates(id) {
   const snap = state.snapshot ?? {}, row = snap.apps?.[id] ?? {}, cert = snap.certifications?.[id];
   const granted = new Set(row.capabilities ?? []), tripped = Object.keys(row.circuits ?? {});
-  const names = [...new Set([...CAPS.map(([key]) => key), ...granted, ...Object.keys(cert?.checks ?? {})])];
+  // Permission switching and full access manage Codex sandbox policy; other apps
+  // have their own permission model, so the chips do not apply to them at all.
+  const applies = (name) => id === "codex" || !CODEX_ONLY.includes(name) || granted.has(name);
+  const names = [...new Set([...CAPS.map(([key]) => key), ...granted, ...Object.keys(cert?.checks ?? {})])].filter(applies);
   return names.map((name) => {
     const check = cert?.checks?.[name];
     if (tripped.includes(name)) return { name, status: "tripped", note: "契约不符，已熔断" };
