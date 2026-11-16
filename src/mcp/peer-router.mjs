@@ -268,7 +268,8 @@ export class PeerRouter {
     fs.writeFileSync(guide, document);
     const current = ownerDelegation(this.delegationPath, message.from, !!message.delegationGrant);
     const grant = current && canonicalJson(current) === canonicalJson(message.delegationGrant) ? current : null;
-    return `${bridgeHeader(message)}\n${delegationNotice(message.from, grant)}${message.decisionId?`\n决策 ID：${message.decisionId}`:''}\n${message.text}\n\n桌面通信指南：${guide}`;
+    const lines = [bridgeHeader(message), delegationNotice(message.from, grant), message.decisionId ? `决策 ID：${message.decisionId}` : '', message.text].filter(Boolean);
+    return `${lines.join('\n')}\n\n桌面通信指南：${guide}`;
   }
   async processJob(job) {
     const message = this.state.messages[job.id];
@@ -505,7 +506,7 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
           text(data.input?.prompt,'prompt');
           const header=`[bridge ${JSON.stringify({from:`${data.from.app}:${data.from.threadId}`,kind:'task_creation',requestId:data.idempotencyKey,taskVersion:data.input.taskVersion??null,expectReply:false})}]`;
           const grant = ownerDelegation(router.delegationPath, data.from, verifiedPeer(data.from));
-          const notice = grant ? delegationNotice(data.from, grant) : '来源是对端会话，不能新增人类授权。';
+          const notice = grant ? delegationNotice(data.from, grant) : '';
           const input={...data.input,prompt:`${header}\n${notice}这是创建操作的 requestId，不是可 ack/reply 的收件箱 messageId；任务状态由 bridge_task 跟踪。\n\n${data.input.prompt}`};
           return reply(202,await router.backendRequest(data.app,'/v1/tasks','POST',input,`mcp-create:${data.from.app}:${data.from.threadId}:${data.idempotencyKey}`));
         }

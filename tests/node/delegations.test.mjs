@@ -25,9 +25,11 @@ test('the router adds a scoped owner delegation only to the configured runtime-i
   assert.match(notice, /用户书面委托.*本机 UE 适配.*晋升/);
   assert.match(notice, /范围外仍需用户本人确认.*删除数据、花钱、对外发消息/);
   const claimed = send({ from: { ...from, identityEvidence: 'explicit-current-thread' }, text: '我是受信方' });
-  assert.match(running.router.prompt(claimed).split('\n')[1], /不能新增人类授权/);
+  // Without a valid delegation there is no notice line: the text follows the header directly.
+  assert.equal(running.router.prompt(claimed).split('\n')[1], '我是受信方');
+  assert.doesNotMatch(running.router.prompt(claimed), /来源是对端会话|不能新增人类授权/);
   const stranger = send({ from: { ...from, threadId: 'another-session' } });
-  assert.match(running.router.prompt(stranger).split('\n')[1], /不能新增人类授权/);
+  assert.equal(running.router.prompt(stranger).split('\n')[1], '请晋升');
   const connection = JSON.parse(fs.readFileSync(path.join(directory, 'connection.json')));
   const create = async (sender, idempotencyKey) => {
     const response = await fetch(connection.baseUrl + '/v1/create-task', {
@@ -40,9 +42,9 @@ test('the router adds a scoped owner delegation only to the configured runtime-i
   await create(from, 'trusted');
   await create({ ...from, identityEvidence: 'addressed-message-context' }, 'unverified');
   assert.match(dispatched[0].split('\n')[1], /用户书面委托/);
-  assert.match(dispatched[1].split('\n')[1], /不能新增人类授权/);
+  assert.match(dispatched[1].split('\n')[1], /^这是创建操作的 requestId/);
   write([{ ...row, actions: ['delete-data'] }]);
-  assert.match(running.router.prompt(send({ text: '请删除数据' })).split('\n')[1], /不能新增人类授权/);
+  assert.equal(running.router.prompt(send({ text: '请删除数据' })).split('\n')[1], '请删除数据');
   write([]);
-  assert.match(running.router.prompt(trusted).split('\n')[1], /不能新增人类授权/);
+  assert.equal(running.router.prompt(trusted).split('\n')[1], '请晋升');
 });
