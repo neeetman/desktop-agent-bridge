@@ -24,9 +24,35 @@ def desktop_rows(rows):
                  'Claude.exe' if row['Name'].lower() == 'claude.exe' else 'ChatGPT.exe'))}
             for row in rows
             if (Path(row['ExecutablePath']).parent / 'resources/app.asar').is_file()
+            # Electron helpers (renderer, GPU, crash reporter) carry --type=. A
+            # helper whose main process already exited has no same-image parent
+            # and would otherwise look like a second desktop.
+            and ' --type=' not in (row.get('CommandLine') or '')
             and not any(parent['ProcessId'] == row['ParentProcessId']
                         and parent['ExecutablePath'].lower() == row['ExecutablePath'].lower()
                         for parent in rows)]
+
+
+def command_line(handle):
+    """Command line through ProcessCommandLineInformation (needs only limited query access).
+
+    Returns None when it cannot be read; callers then fall back to parent checks."""
+    ntdll = ctypes.WinDLL('ntdll')
+    ntdll.NtQueryInformationProcess.argtypes = [w.HANDLE, w.ULONG, ctypes.c_void_p, w.ULONG, ctypes.POINTER(w.ULONG)]
+    ntdll.NtQueryInformationProcess.restype = w.LONG
+    size = w.ULONG(0)
+    ntdll.NtQueryInformationProcess(handle, 60, None, 0, ctypes.byref(size))
+    if not size.value or size.value > 1 << 20:
+        return None
+    buffer = ctypes.create_string_buffer(size.value)
+    if ntdll.NtQueryInformationProcess(handle, 60, buffer, size, ctypes.byref(size)) != 0:
+        return None
+    class UnicodeString(ctypes.Structure):
+        _fields_ = [('Length', w.USHORT), ('MaximumLength', w.USHORT), ('Buffer', ctypes.c_void_p)]
+    value = UnicodeString.from_buffer(buffer)
+    if not value.Buffer or not value.Length:
+        return None
+    return ctypes.wstring_at(value.Buffer, value.Length // 2)
 
 
 def process_rows(names=('chatgpt.exe', 'claude.exe'), pids=None):
@@ -84,7 +110,7 @@ def process_rows(names=('chatgpt.exe', 'claude.exe'), pids=None):
                             created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
                             rows.append({'ProcessId': pid, 'ParentProcessId': entry.th32ParentProcessID,
                                          'Name': entry.szExeFile, 'ExecutablePath': name.value,
-                                         'Created': cim_time(created)})
+                                         'Created': cim_time(created), 'CommandLine': command_line(handle)})
                         finally:
                             kernel.CloseHandle(handle)
             found = kernel.Process32NextW(snapshot, ctypes.byref(entry))
