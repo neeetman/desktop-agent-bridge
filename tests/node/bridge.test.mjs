@@ -369,3 +369,15 @@ test('decision signals persist, pause completion, and answer wakes the same sess
     assert.equal(bridge.state.tasks[created.data.id].result, 'FINAL'); assert.equal(sends, 1);
   } finally { await bridge.close(); removeTestDirectory(stateDir); }
 });
+
+test('startup refreshes callback credentials only for unfinished tasks', async () => {
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-callbacks-'));
+ const task=(id,status)=>({id,status,threadId:'thread-'+id,createdAt:'2026-11-01T00:00:00.000Z',callbackMode:'external'});
+ const tasks={done:task('done','completed'),closed:task('closed','interrupted'),live:task('live','running')};
+ fs.writeFileSync(path.join(stateDir,'state.json'),JSON.stringify({schemaVersion:1,token:'fixture-secret',tasks,watches:{},idempotency:{}}));
+ const bridge=await startBridge({tools:{close(){}},stateDir,port:0,enableIpc:false});
+ try {
+  const files=fs.readdirSync(stateDir).filter(name=>name.startsWith('task-callback-')).sort();
+  assert.deepEqual(files,['task-callback-live.json']);
+ } finally { await bridge.close();removeTestDirectory(stateDir); }
+});
