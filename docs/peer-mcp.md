@@ -2,6 +2,21 @@
 
 Codex、Claude 和 Antigravity 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 Host 中的 `deepseek-plugin.mjs`。Antigravity 的所有会话共用一个 MCP 进程，身份取自每次 `tools/call` 的 `_meta`（`antigravity.google/conversation_id`），见 [Antigravity](antigravity.md)。当前共用工具目录有 **21 个工具**，已启动的旧 MCP worker 可能仍保留旧目录。
 
+## desktop-bridge skill
+
+桌面通信指南以 skill 形式安装（源文件 `src/skills/desktop-bridge/SKILL.md`），在会话收到 `[bridge {...}]` 开头的消息或调用 `bridge_*` 工具时由各 harness 按描述加载。MCP 服务器的 `instructions` 仍保留最短的常驻规则。
+
+| 应用 | 安装位置 | 发现方式 |
+|---|---|---|
+| Claude Code（Claude 桌面） | `~/.claude/skills/desktop-bridge/`（设了 `CLAUDE_CONFIG_DIR` 时在其下） | 用户级 skill 目录，新会话启动时读取 |
+| Codex 桌面 | `~/.agents/skills/desktop-bridge/` | Codex 的 `user-agent-skills` 根（另有 `$CODEX_HOME/skills`，不重复安装） |
+| DeepSeek Harness | `~/.agents/skills/desktop-bridge/`（与 Codex 共用） | Harness 的 `user-agents` skill 根 |
+| Antigravity | `~/.gemini/config/plugins/desktop-agent-bridge/skills/desktop-bridge/` | 受管插件的 `skills/` 目录，由 `install-antigravity-plugin.py` 一并写入 |
+
+`python scripts/install/install-bridge-skill.py` 安装或更新全部位置（`--plan` 只打印将要做的改动，`--target claude|agents|antigravity` 限定位置）。每份副本带 `.desktop-bridge-skill.json` 标记：仓库版本号（SKILL.md 的 sha256 前 16 位）、文件 sha256 与安装时间；`runtime/skills/installation.json` 记录最近一次安装。状态分为 `missing`、`unmanaged`（同名但非本项目所装，拒绝覆盖）、`modified`（安装后被改动）、`outdated` 与 `current`；更新前会把旧副本备份到 `runtime/skill-backups/`。
+
+路由器在投递时检查收件应用的副本：`current` 时消息不再附 `桌面通信指南：<路径>`；缺失、过期或被改动时仍附该行作为回退，指向由 skill 正文生成的 `runtime/router/peer-guide-v2.md`。已启动的会话要在新会话或重新加载 skill 后才会看到新版本。
+
 ## 路由和回复
 
 先调用 `bridge_self` 确认本机当前会话。调用 `bridge_list_threads` 按完整标题、项目、状态查询；只有确认唯一目标后，才使用 `{toApp, toThreadId}` 发送。标题支持检索，但不是唯一标识，不能作为 `toThreadId`。

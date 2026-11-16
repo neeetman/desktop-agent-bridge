@@ -83,5 +83,8 @@ if ($WithAntigravity) {
     & $python @pluginArgs
     if ($LASTEXITCODE -ne 0) { throw 'Antigravity plugin installation failed; inspect runtime/antigravity/plugin-backups.' }
 }
+# The desktop-bridge skill replaces the per-message guide line for Claude, Codex, DeepSeek and Antigravity.
+& $python (SourceFile 'install-bridge-skill.py')
+if ($LASTEXITCODE -ne 0) { throw 'desktop-bridge skill installation failed; inspect runtime/skill-backups.' }
 & (SourceFile 'install-autostart.ps1') -WithoutDeepSeek:(-not $WithDeepSeek) -WithoutAntigravity:(-not $WithAntigravity)
 Write-Output 'Installation registered. Allow the supervisor to start, then run npm run status and verify native communication. Existing GUI sessions may need to reconnect their MCP worker.'

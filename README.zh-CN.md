@@ -46,7 +46,7 @@ Windows 桌面端 Codex、Claude Code、DeepSeek Harness 与 Antigravity 2.0 的
 
 5. 等待守护启动，运行 `npm run status`。在两端调用 `bridge_self`，再验证精确会话路由、回复和决策闭环。已有 GUI 会话可能需要重连 MCP worker；安装成功不等于旧会话已加载新工具目录。
 
-安装器会备份并合并一个名为 `desktop-bridge` 的 MCP 条目，保留其他设置；缺少配置文件时会创建。检测到 cc-switch 时尝试同步其登记。登录启动使用当前用户，无需保存 Windows 密码。详细步骤见 [部署说明](docs/deployment.md)。
+安装器会备份并合并一个名为 `desktop-bridge` 的 MCP 条目，保留其他设置，并为 Claude、Codex、DeepSeek Harness 和 Antigravity 安装 `desktop-bridge` skill（桌面通信指南，见 [MCP 说明](docs/peer-mcp.md#desktop-bridge-skill)）；缺少配置文件时会创建。检测到 cc-switch 时尝试同步其登记。登录启动使用当前用户，无需保存 Windows 密码。详细步骤见 [部署说明](docs/deployment.md)。
 
 ## 已验证的兼容范围
 

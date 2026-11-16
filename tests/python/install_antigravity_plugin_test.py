@@ -30,6 +30,15 @@ class AntigravityPlugin(unittest.TestCase):
         self.assertFalse((self.plugin / 'hooks.json').exists())
         self.assertEqual(proof['server'], 'desktop-agent-bridge_desktop-bridge')
         self.assertTrue((self.runtime / 'plugin-installation.json').exists())
+        skill = self.plugin / 'skills/desktop-bridge'
+        self.assertEqual((skill / 'SKILL.md').read_bytes(), source_file(ROOT, 'desktop-bridge-skill.md').read_bytes())
+        self.assertEqual(proof['skillRevision'], installer.bridge_skill.skill_revision(ROOT))
+        self.assertEqual(installer.bridge_skill.status(skill, proof['skillRevision'])['state'], 'current')
+        # A reinstall accepts its own skill folder but not foreign skills in the plugin.
+        installer.install(ROOT, self.home, 'node', runtime=self.runtime)
+        (self.plugin / 'skills/other').mkdir()
+        with self.assertRaisesRegex(RuntimeError, 'skills/other'):
+            installer.install(ROOT, self.home, 'node', runtime=self.runtime)
 
     def test_identity_hook_is_self_contained_and_removable(self):
         installer.install(ROOT, self.home, 'node', identity_hook=True, runtime=self.runtime)

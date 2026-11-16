@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ship the desktop communication guide as the `desktop-bridge` skill, installed for Claude Code (`~/.claude/skills`), Codex and DeepSeek Harness (`~/.agents/skills`) and the Antigravity plugin (`skills/`) by `scripts/install/install-bridge-skill.py` and `install.ps1`. Each copy records its repository revision for drift detection. Bridged messages no longer append the `桌面通信指南` line for apps whose skill copy is current; missing, outdated or edited copies keep the fallback guide file.
 - Add Antigravity 2.0 as a fourth app without injection: discover the live Language Server Hub from its daemon file, send, wake and create chats through the bundled `agentapi` CLI (CSRF token passed only in the child environment), and read chats from the read-only conversation index and transcript logs. Sender identity comes from `tools/call` `_meta`, with an optional PreToolUse hook fallback. Writes are gated by contract probes, and messages stay queued while the desktop is closed. `doctor --app antigravity` reports the contract, hub and service.
 - Deliver messages, replies and decision questions into active chats using the native input path; waiting for a reply no longer blocks subsequent inputs.
 - Keep native acceptance, explicit consumption and exact-message replies separate, including across service restarts. Preserve current model and permission settings for peer inputs.
