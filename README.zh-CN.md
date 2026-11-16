@@ -8,7 +8,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接器，当前版本 **0.8.4**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。
+Windows 桌面端 Codex、Claude Code、DeepSeek Harness 与 Antigravity 2.0 的本机会话桥接器，当前版本 **0.8.4**，MIT 许可证。npm 包名为 [`@neeetman/desktop-agent-bridge`](https://www.npmjs.com/package/@neeetman/desktop-agent-bridge)。
 
 会话可以通过 MCP 主动互发消息、接收回复、请求决策，并在答复到达时唤醒原会话。支持按标题搜索后用精确 ID 路由、多会话队列、项目/工作区、模型与 effort 读回，以及 Codex 托管会话的下一轮权限设置。
 
@@ -42,6 +42,8 @@ Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接
 
    可选 DeepSeek Harness：先初始化它的桌面 profile，再在安装命令上添加 `-WithDeepSeek`。默认只管理 Codex 和 Claude。
 
+   可选 Antigravity 2.0：添加 `-WithAntigravity`，安装 Antigravity 插件 `desktop-agent-bridge`（MCP 服务名 `desktop-agent-bridge_desktop-bridge`）和 43134 端口的桥接服务。不用 Frida：从 `~/.gemini/antigravity/daemon/hub_<port>.json` 找到存活的 Language Server Hub，写入走自带的 `language_server.exe agentapi`（CSRF 令牌只经子进程环境变量传递，从不打印），读取走只读打开的 `conversation_summaries.db` 和 transcript 日志。发送者身份取自 `tools/call` 的 `_meta` 中的 `antigravity.google/conversation_id`；`-AntigravityIdentityHook` 额外安装 PreToolUse 兜底钩子。Antigravity 未运行时消息留在持久队列。守护只运行桥接服务，不会启动或重启 Antigravity 桌面。详见 [Antigravity 说明](docs/antigravity.md)（英文）。
+
 5. 等待守护启动，运行 `npm run status`。在两端调用 `bridge_self`，再验证精确会话路由、回复和决策闭环。已有 GUI 会话可能需要重连 MCP worker；安装成功不等于旧会话已加载新工具目录。
 
 安装器会备份并合并一个名为 `desktop-bridge` 的 MCP 条目，保留其他设置；缺少配置文件时会创建。检测到 cc-switch 时尝试同步其登记。登录启动使用当前用户，无需保存 Windows 密码。详细步骤见 [部署说明](docs/deployment.md)。
@@ -54,6 +56,7 @@ Windows 桌面端 Codex、Claude Code 与 DeepSeek Harness 的本机会话桥接
 | Claude Windows x64 | `4.29.0` | 兼容清单校验 EXE、app.asar |
 | Claude Windows x64 | `4.4212.0`（Appx `4.4212.0.0`） | 已验证会话与 worker 身份契约 |
 | DeepSeek Harness | `0.2.1-rc.3` | 原生 Cordis Host 插件；升级后重新验证契约 |
+| Antigravity 2.0 | `44.9.1`（Language Server `2.32.1`） | 契约探针：`agentapi` 子命令、索引列、存活 Hub 的 `/healthz`；`doctor --app antigravity` 查看 |
 
 Frida 固定为 `17.9.1`。未知 Codex/Claude 文件哈希会拒绝附着；不要通过直接更新哈希来声称兼容。当前只支持本机 Windows 桌面环境，HTTP 服务只监听 `127.0.0.1`。
 

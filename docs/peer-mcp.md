@@ -1,6 +1,6 @@
 # 会话协作 MCP
 
-Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 Host 中的 `deepseek-plugin.mjs`。当前共用工具目录有 **21 个工具**，已启动的旧 MCP worker 可能仍保留旧目录。
+Codex、Claude 和 Antigravity 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 Host 中的 `deepseek-plugin.mjs`。Antigravity 的所有会话共用一个 MCP 进程，身份取自每次 `tools/call` 的 `_meta`（`antigravity.google/conversation_id`），见 [Antigravity](antigravity.md)。当前共用工具目录有 **21 个工具**，已启动的旧 MCP worker 可能仍保留旧目录。
 
 ## 路由和回复
 

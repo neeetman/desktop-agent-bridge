@@ -1,13 +1,13 @@
 # 架构与源码
 
 ```text
-Codex / Claude stdio MCP        DeepSeek Host 原生插件
-             \                  /
-               peer-router.mjs
-                 /     |     \
-         Codex HTTP  Claude HTTP  DeepSeek HTTP
-               |       |              |
-       桌面原生管道  主进程/页面 API  Host 会话/工作区 API
+Codex / Claude / Antigravity stdio MCP        DeepSeek Host 原生插件
+                       \                       /
+                         peer-router.mjs
+                 /        |         |            \
+         Codex HTTP  Claude HTTP  DeepSeek HTTP  Antigravity HTTP
+               |          |          |               |
+       桌面原生管道  主进程/页面 API  Host 会话/工作区 API  Hub + agentapi CLI + 本地索引/日志
 ```
 
 | 源码 | 职责 |
@@ -19,11 +19,12 @@ Codex / Claude stdio MCP        DeepSeek Host 原生插件
 | `claude-autoattach.py`、`claude-main-attach.cjs` | Claude 生命周期、重启/页面刷新附着 |
 | `claude-file-relay.mjs`、`claude-native.mjs` | Claude 窄原生 API、transcript 和会话映射 |
 | `deepseek-plugin.mjs`、`deepseek-native.mjs` | Host 工具、会话和工作区映射 |
+| `antigravity-native.mjs`、`antigravity-bridge.mjs` | Antigravity Hub 发现、`agentapi` 写入、索引/transcript 读取与回合映射、契约探针；见 [Antigravity](antigravity.md) |
 | `peer-router.mjs`、`peer-catalog.mjs`、`peer-call.mjs` | 消息/决策路由、工具目录和三端语义 |
 | `bridge-supervisor.mjs`、`supervisor-task.pyw` | 当前用户登录启动、恢复与看门狗 |
 | `install.ps1`、`deployment.py` | 新机器预检和初始化 |
 
-HTTP 端口：Codex 43127、Claude relay 43128、Claude 43129、router 43130、supervisor 43131、DeepSeek Host 43132、DeepSeek 43133。固定端口和原生管道目前限制同一交互用户使用一份安装。
+HTTP 端口：Codex 43127、Claude relay 43128、Claude 43129、router 43130、supervisor 43131、DeepSeek Host 43132、DeepSeek 43133、Antigravity 43134。固定端口和原生管道目前限制同一交互用户使用一份安装。
 
 HTTP 使用本机 Bearer token，拒绝带 Origin 的浏览器请求。凭证只从本机 connection 文件读取。主要后端路由：
 
