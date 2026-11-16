@@ -1,12 +1,14 @@
 export function certifiedCapabilities(app, checks) {
   const result = ["read", "send"];
-  for (const name of ["create", "permissions", "mcp"]) {
+  for (const name of ["create", "permissions", "fullAccess", "mcp"]) {
     const row = checks?.[name];
     if (row?.status !== "passed") continue;
     const e = row.evidence;
     if (typeof e?.threadId !== "string" || !e.threadId)
       throw Error("Missing native chat ID for " + name);
     if (name === "create" && !e.cwd) throw Error("Missing creation workspace");
+    if (name === "fullAccess" && (app !== "codex" || !result.includes("create") || !e.cwd || e.sandboxMode !== "danger-full-access" || e.approvalPolicy !== "never"))
+      throw Error("Missing full-access creation readback");
     if (
       name === "permissions" &&
       (app !== "codex" ||
@@ -37,8 +39,10 @@ export function checkExecutionOperation(caps, method, input, allowFullAccess = f
     method === "set_permissions"
       ? caps.includes("permissions")
       : ["create", "prepare"].includes(method) && caps.includes("create");
-  const fullAccess = allowFullAccess && caps.includes("permissions") &&
-    input?.sandboxMode === "danger-full-access" && input.approvalPolicy === "never";
+  // Full access is either certified for this build (fullAccess) or opted into
+  // by the local operator on a permissions-certified build (allowFullAccess).
+  const fullAccess = input?.sandboxMode === "danger-full-access" && input.approvalPolicy === "never" &&
+    (caps.includes("fullAccess") || (allowFullAccess && caps.includes("permissions")));
   const restricted = input?.approvalPolicy === "on-request" && (
     input.sandboxMode === "read-only" ||
     (input.sandboxMode === "workspace-write" && caps.includes("permissions"))
@@ -75,10 +79,10 @@ export async function probeCapabilities(app, call, checkBuild, save, creationEvi
     certifiedCapabilities(app, checks);
     save(checks);
   }
-  for (const capability of ["create", "permissions", "mcp"]) {
+  for (const capability of ["create", "permissions", "fullAccess", "mcp"]) {
     if (capability === "create" && creationEvidence) continue;
     if (
-      capability === "permissions" &&
+      ["permissions", "fullAccess"].includes(capability) &&
       (app === "claude" || checks.create.status !== "passed")
     ) {
       checks[capability] = {

@@ -16,6 +16,60 @@ function removeTestDirectory(directory) {
   assert.ok(!relative.startsWith('..') && !path.isAbsolute(relative) && path.basename(resolved).startsWith('codex-bridge-'));
   fs.rmSync(resolved, { recursive: true, force: true });
 }
+test('corrupt backend state or event journal aborts before any write or native preflight', async () => {
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-corrupt-'));
+ const stateFile=path.join(stateDir,'state.json'), journal=path.join(stateDir,'events.jsonl');
+ const state=JSON.stringify({schemaVersion:1,token:'fixture-secret',tasks:{},watches:{},idempotency:{}});
+ const damaged=Buffer.alloc(64);
+ let probes=0;
+ const start=()=>startBridge({tools:{close(){}},stateDir,port:0,enableIpc:false,preflight:async()=>{probes++;}});
+ try {
+  fs.writeFileSync(stateFile,damaged);
+  await assert.rejects(start(),{code:'STATE_JSON_INVALID',message:new RegExp('state\\.json')});
+  assert.deepEqual(fs.readFileSync(stateFile),damaged);
+  fs.writeFileSync(stateFile,state);
+  fs.writeFileSync(journal,damaged);
+  await assert.rejects(start(),{code:'STATE_JSON_INVALID',message:new RegExp('events\\.jsonl')});
+  assert.equal(fs.readFileSync(stateFile,'utf8'),state);
+  assert.deepEqual(fs.readFileSync(journal),damaged);
+  assert.equal(fs.existsSync(path.join(stateDir,'connection.json')),false);
+  assert.equal(probes,0);
+ } finally { removeTestDirectory(stateDir); }
+});
+test('a recovered ledger reserves old requests and accepts fresh peer messages without reusing an event ID', async () => {
+ const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-recovery-'));
+ const reserved='peer-router:'+crypto.randomUUID(), fresh='peer-router:'+crypto.randomUUID();
+ const task={id:'original',threadId:'worker',status:'unknown',callbackMode:'peer'};
+ const recovery={at:'2026-11-09T00:00:00.000Z',newKeyPrefix:'recovery-fixture:',eventFloor:10,legacyWatches:[]};
+ const state={schemaVersion:1,token:'fixture-secret',tasks:{original:task},watches:{},idempotency:{[reserved]:{taskId:'original',recovered:true}},recovery};
+ fs.writeFileSync(path.join(stateDir,'state.json'),JSON.stringify(state));
+ let sends=0;
+ const tools={close(){},async call(name){assert.equal(name,'send_message_to_thread');sends++;return {threadId:'worker'};}};
+ const bridge=await startBridge({tools,stateDir,port:0,enableIpc:false});
+ const headers={Authorization:'Bearer '+bridge.token,'Content-Type':'application/json'};
+ const route='/v1/threads/worker/messages';
+ const send=(key,peerNotification=true)=>fetch(bridge.baseUrl+route,{method:'POST',headers:{...headers,'Idempotency-Key':key},body:JSON.stringify({prompt:'fixture',callbackMode:'peer',peerNotification})});
+ try {
+  const record=await fetch(bridge.baseUrl+'/v1/dispatch-record?key='+encodeURIComponent(reserved),{headers});
+  assert.deepEqual(await record.json(),{taskId:'original',status:'unknown'});
+  let response=await send(reserved);
+  assert.equal(response.status,409);
+  assert.equal((await response.json()).code,'RECOVERED_KEY_RESERVED');
+  response=await send('unverifiable-historical-request',false);
+  assert.equal(response.status,409);
+  assert.equal((await response.json()).code,'RECOVERY_KEY_REQUIRED');
+  assert.equal(sends,0);
+  response=await send(fresh);
+  assert.equal(response.status,202);
+  const first=await response.json();
+  response=await send(fresh);
+  assert.equal(response.status,202);
+  assert.equal((await response.json()).id,first.id);
+  assert.equal(sends,1);
+  response=await fetch(bridge.baseUrl+'/v1/events',{headers});
+  assert.equal((await response.json()).events[0].id,11);
+ } finally { await bridge.close();removeTestDirectory(stateDir); }
+});
 test('cold startup creates credentials before guarded native preflight and publishes readiness afterwards',async()=>{
  const stateDir=fs.mkdtempSync(path.join(os.tmpdir(),'codex-bridge-bootstrap-'));let closed=false;
  const tools={callerThread:'test',close(){closed=true;}};

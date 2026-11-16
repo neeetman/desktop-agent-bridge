@@ -21,7 +21,7 @@ export async function executionRpc(method,params={}){
    if(selection.profile.coreApiVersion===2){
      const input=method==='prepare'?policy.loadState().threads[params.threadId]:params.args??params.policy;
      const fullAccess=input?.sandboxMode==='danger-full-access';
-     checkExecutionOperation(selection.profile.capabilities,method,input,fullAccess&&policy.readSettings().allowFullAccess===true);
+     checkExecutionOperation(selection.effectiveCapabilities??selection.profile.capabilities,method,input,fullAccess&&policy.readSettings().allowFullAccess===true);
      if(fullAccess)return verifyFullAccess(method,await executionWire(method,request));
    }
    return executionWire(method,request);

@@ -50,6 +50,11 @@ export async function main(args){
     const kind=app==='claude'?'claude':result.apps.codex?.capabilities?.some(c=>['create','execution'].includes(c))?'execution':'messaging';
     const selected=await coordinator.resolve(app,kind==='execution'?'execution':'read');
     result.probe=await helperStatus(selected,kind);result.passive=false;
+    if(result.probe.ready){
+     const details={helperReady:true,kind};
+     await coordinator.report(app,selected.binding,'attached',details);
+     Object.assign(result.apps[app],{phase:'attached',probe:details});
+    }
    }
   }else if(args[0]==='compat'){
    if(args[1]==='list')result={profiles:coordinator.profiles().map(({profile})=>({id:profile.id,app:profile.app,version:profile.packageVersion,revoked:profile.revoked,adapterDigest:profile.adapterDigest,capabilities:profile.capabilities}))};

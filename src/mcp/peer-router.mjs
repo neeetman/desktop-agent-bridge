@@ -16,6 +16,13 @@ import {SCRIPT_ROUTE,scriptCreateTask} from './script-callers.mjs';
 
 const ROOT = fileURLToPath(projectURL(''));
 const bad = (status, message) => Object.assign(new Error(message), { status });
+// The bridge connects different harnesses. Same-app chats use the harness's own
+// session messaging (Claude SendMessage/start_session, Codex's own channel).
+// Replies and decision answers to existing items are still allowed to finish.
+export function crossApp(from, to) {
+  if (from?.app && to?.app && from.app === to.app)
+    throw Object.assign(bad(400, `Same-app bridge traffic is rejected (${from.app} to ${to.app}); use ${from.app}'s own session messaging instead`), { code: 'SAME_APP_FORBIDDEN' });
+}
 const text = (value, field) => { if (typeof value !== 'string' || !value.trim()) throw bad(400, `${field} is required`); return value; };
 const address = value => { if (!value || !['codex', 'claude', 'deepseek'].includes(value.app)) throw bad(400, 'Address requires app=codex|claude|deepseek'); text(value.threadId, 'threadId'); return { app: value.app, threadId: value.threadId }; };
 const equal = (a, b) => a.app === b.app && a.threadId === b.threadId;
@@ -85,6 +92,7 @@ export class PeerRouter {
     return {messageId:message.id,consumption:message.consumption,receipt:this.receipt(message.to,message.consumption.turnId,message.id)};
   }
   async send(input, kind = 'message') {
+    crossApp(input.from, input.to);
     const message = this.prepareMessage(input, kind);
     this.commitQueue();
     return message;
@@ -205,6 +213,7 @@ export class PeerRouter {
     if (!Array.isArray(input.options) || input.options.length < 2 || input.options.length > 10 || input.options.some(x => typeof x !== 'string' || !x.trim()) || new Set(input.options).size !== input.options.length) throw bad(400, 'Provide 2-10 distinct decision options');
     if (input.recommendation && !input.options.includes(input.recommendation)) throw bad(400, 'Recommendation must be an option');
     const from = address(input.from), to = address(input.to);
+    crossApp(from, to);
     const key = input.messageId ? `decision:${from.app}:${from.threadId}:${input.messageId}` : null;
     const fingerprint = canonicalJson({ ...input, from, to });
     if (key && this.state.keys[key]) { const old = this.state.keys[key]; if (old.fingerprint !== fingerprint) throw bad(409, 'Decision messageId conflict'); return this.state.decisions[old.id]; }
@@ -327,7 +336,7 @@ export class PeerRouter {
         // Only an explicitly linked callback answer resumes a tracked task.
         task??=await this.backendRequest(message.to.app, `/v1/threads/${message.to.threadId}/messages`, 'POST', { prompt: job.prompt,callbackMode:'peer',taskVersion:message.taskVersion??undefined,peerNotification:true }, `peer-router:${message.id}`);
       } catch (error) {
-        if (error.code === 'CACHED_TASK_OUTCOME_UNKNOWN' || error.code === 'CACHED_TASK_FAILURE') {
+        if (['CACHED_TASK_OUTCOME_UNKNOWN', 'CACHED_TASK_FAILURE', 'RECOVERED_KEY_RESERVED', 'RECOVERY_KEY_REQUIRED'].includes(error.code)) {
           job.status = message.status = error.code === 'CACHED_TASK_FAILURE' ? 'failed' : 'unknown';
           job.error = error.message; this.save(); return;
         }
@@ -478,6 +487,7 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         case '/v1/create-task': {
           address(data.from);await router.validate(data.from);
           if(!['codex','claude','deepseek'].includes(data.app))throw bad(400,'Unknown app');
+          crossApp(data.from,{app:data.app,threadId:'new'});
           if(data.input?.threadId)throw bad(400,'create-task creates a new chat; use bridge_send for an existing chat');
           text(data.idempotencyKey,'idempotencyKey');
           text(data.input?.prompt,'prompt');

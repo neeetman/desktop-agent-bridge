@@ -12,6 +12,8 @@ Codex 和 Claude 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek 使用同一 
 
 使用 `bridge_send` 发送；接收方使用 `bridge_ack` 确认消费，使用 `bridge_reply({messageId,text})` 回复。路由器自动返回来源会话。普通消息、回复、决策问题均可在会话运行中交给原生接口追加或排队；`expectReply` 仅决定是否需要回复，不控制投递时机。只有关联到旧 callback 任务的决策续跑仍等待当前轮结束。`delivered` 只表示投递，不代表已阅读；结果未知的派发不会自动重发。相同请求复用稳定的 messageId，不同内容不能复用。
 
+桥接只用于跨应用通信。Claude→Claude、Codex→Codex 等同应用的发送、决策请求和新建任务会被路由器以 `SAME_APP_FORBIDDEN` 拒绝；同应用会话使用各自 harness 的会话功能。已有消息的回复和已有决策的答复不受影响。
+
 `expectReply:false` 表示通知，接收方不得回复或继续转发。`bridge_receive` 查看收件箱，`bridge_message` 读消息状态，`bridge_archive_messages` 归档已结束消息，`bridge_health` 查看组件和原生连通性。
 
 ## 健康通知与超时诊断

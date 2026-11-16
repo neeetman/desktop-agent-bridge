@@ -95,6 +95,12 @@ test("verified permission changes only apply within the accepted sandbox modes",
     () => checkExecutionOperation(["create"], "set_permissions", input),
     { code: "CAPABILITY_UNSUPPORTED" },
   );
+  checkExecutionOperation(["create", "fullAccess"], "create", {
+    sandboxMode: "danger-full-access", approvalPolicy: "never", writableRoots: [],
+  });
+  assert.throws(() => checkExecutionOperation(["create", "permissions"], "create", {
+    sandboxMode: "danger-full-access", approvalPolicy: "never", writableRoots: [],
+  }), { code: "CAPABILITY_UNSUPPORTED" });
   const caps = ["create", "permissions"];
   checkExecutionOperation(caps, "set_permissions", input);
   for (const override of [
@@ -123,7 +129,7 @@ test("an automatically prepared validation chat supplies creation evidence witho
     if (method === "mcp") throw Error("DEFERRED: protected desktop chat");
     return { threadId: fixture.threadId, changed: "workspace-write", restored: "read-only" };
   }, async () => {}, () => {}, fixture);
-  assert.deepEqual(calls, ["permissions", "mcp"]);
+  assert.deepEqual(calls, ["permissions", "fullAccess", "mcp"]);
   assert.deepEqual(checks.create.evidence, fixture);
   assert.deepEqual(certifiedCapabilities("codex", checks), ["read", "send", "create", "permissions"]);
 });

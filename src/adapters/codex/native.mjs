@@ -10,6 +10,7 @@ import policy from '../../core/execution-policy.cjs';
 import {registeredLocation} from '../../core/worktree-location.mjs';
 import {ensureExecution,executionRpc} from './codex-execution.mjs';
 import {withCapability,compatError} from '../../compat/compatibility.mjs';
+import {checkExecutionOperation} from '../../compat/capability-checks.mjs';
 
 const run = promisify(execFile);
 export const MAX_FRAME = 8 * 1024 * 1024;
@@ -154,6 +155,9 @@ export class DesktopTools {
     else if(execution.target.type==='project'){const project=projects.find(row=>row.projectId===execution.target.projectId);if(!project)throw Object.assign(new Error('Registered project not found'),{status:400});execution.cwd=policy.canonicalDirectory(project.path);}
     if(execution.model)execution.model=resolveSelection(await this.listModels(),execution.model,execution.effort);
     execution.executionPolicy=executionPolicy;
+    await this.guardRuntime('codex','execution',async selection=>{
+      if(selection.profile?.coreApiVersion===2)checkExecutionOperation(selection.effectiveCapabilities??selection.profile.capabilities,'create',executionPolicy,executionPolicy?.sandboxMode==='danger-full-access'&&policy.readSettings().allowFullAccess===true);
+    });
     // Resolve compatibility before bridge.mjs reserves an idempotency record.
     await this.checkExecutionReady();
     return execution;

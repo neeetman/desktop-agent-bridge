@@ -33,6 +33,23 @@ test('known-unsent adapter waits respect TTL; uncertain writes are not expired o
  }finally{f.close();}
 });
 
+test('a recovered key conflict is terminal and is never queued for another dispatch', async () => {
+ const f=fixture();
+ let attempts=0;
+ try {
+  const message=await f.router.send({from,to,text:'historical input'});
+  f.router.backendRequest=async(app,route,method,...rest)=>{
+   if(method!=='POST')return f.backendRequest(app,route,method,...rest);
+   attempts++;
+   throw Object.assign(Error('Historical key is reserved'),{status:409,code:'RECOVERED_KEY_RESERVED'});
+  };
+  await f.tick();
+  await f.tick();
+  assert.equal(attempts,1);
+  assert.equal(f.router.state.jobs[message.id].status,'unknown');
+ } finally { f.close(); }
+});
+
 test('reply-requesting inputs do not read the recipient or wait for a turn; receipts survive restart',async()=>{
  const f=fixture();let sends=0;const backend=async(app,route,method,body)=>{
   if(route.endsWith('/settings'))return {settings:{}};
@@ -288,4 +305,16 @@ test('archiving is atomic and cannot hide active or uncertain work',async()=>{
     const done=await f.router.send({from,to,text:'completed notice',expectReply:false});await f.tick();f.setTask('running');const active=await f.router.send({from,to,text:'active'});await f.tick();
     assert.throws(()=>f.router.archiveMessages({from:to,messageIds:[done.id,active.id],reason:'must fail atomically'}),/terminal/);assert.equal(done.archivedAt,undefined);assert.equal(active.consumption.status,'unconfirmed');
   }finally{f.close();}
+});
+
+test('same-app messages and decision requests are rejected; cross-app traffic is unaffected',async()=>{
+ const f=fixture();try{
+  for(const app of ['claude','codex']){
+   const a={app,threadId:app==='claude'?'local_x':'x'},b={app,threadId:app==='claude'?'local_y':'y'};
+   await assert.rejects(f.router.send({from:a,to:b,text:'hi'}),{code:'SAME_APP_FORBIDDEN',status:400});
+   await assert.rejects(f.router.requestDecision({from:a,to:b,question:'q',options:['x','y']}),{code:'SAME_APP_FORBIDDEN'});
+  }
+  assert.equal(Object.keys(f.router.state.messages).length,0);assert.equal(Object.keys(f.router.state.decisions).length,0);
+  const m=await f.router.send({from,to,text:'cross-app'});assert.equal(m.to.app,'claude');
+ }finally{f.close();}
 });
