@@ -441,7 +441,9 @@ export async function startBridge({ tools, stateDir, port = 43127, pollMs = 3000
   baseUrl = `http://127.0.0.1:${server.address().port}`;
   writeJson(path.join(stateDir, 'connection.json'), { baseUrl, token: state.token, pid: process.pid, callerThread: tools.callerThread, backend: state.provider });
   for (const item of Object.values(state.watches)) callback(item.threadId);
-  for (const task of Object.values(state.tasks)) signals.taskCallback(task);
+  // Only unfinished tasks can still report back; refreshing credentials for every
+  // historical task recreated hundreds of callback files on each start.
+  for (const task of Object.values(state.tasks)) if (!terminal.has(task.status)) signals.taskCallback(task);
   server.removeListener('request',initializing);server.on('request',handleRequest);
   const timer = setInterval(() => { for (const item of Object.values(state.watches)) void refresh(item); }, pollMs);
   timer.unref();
