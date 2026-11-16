@@ -138,8 +138,72 @@ export class Compatibility {
     return {profile,adapterRoot,profileDigest:digest(canonical(profile)),generation,fileStamp:stamp,runningBuild:{...processInfo,hashes,packageVersion:profile.packageVersion,observedPackageVersion:processInfo.executable.match(/_(\d+(?:\.\d+){2,3})_/)?.[1]??null},installedBuild:inventory.installed.find(row=>row.app===app)??null};
   }
   save(state,event){if(event){state.journal.push({at:new Date(this.now()).toISOString(),...event});state.journal=state.journal.slice(-1000);}atomicJson(this.file,state);}
+  // Nearly every call finds the selection unchanged: same desktop process, profile
+  // and credentials. Answer those without the cross-process lock or a state write.
+  // Under many concurrent tasks the locked path queued past the lock timeout
+  // ("Coordinator lock could not be acquired"). Anything not provably unchanged,
+  // and every lease request, takes the locked path below. This path never writes.
+  resolveUnchanged(app,capability,inventory,pid){
+    let state,selected;
+    try{state=this.state();selected=this.evaluate(app,inventory,state);}catch{return null;}
+    const old=state.apps[app];
+    if(!old||old.phase==='blocked'||old.transition||old.profileId!==selected.profile.id||old.generation!==selected.generation||old.profileDigest!==selected.profileDigest||old.fileStamp!==selected.fileStamp)return null;
+    if(pid&&selected.runningBuild.pid!==pid)return null;
+    const required=selected.profile.coreApiVersion===2&&app==='codex'&&capability==='execution'?'create':capability;
+    if(!selected.profile.capabilities.includes(required))return null;
+    const circuit=old.circuits?.[capability];
+    if(circuit&&circuit.generation===selected.generation&&circuit.profileDigest===selected.profileDigest)return null;
+    const connection=readJson(path.join(this.root,app==='codex'?'runtime/connection.json':'runtime/claude-relay/connection.json'),null);
+    if(!connection?.token||digest(connection.token)!==old.credentialDigest)return null;
+    const identity=readJson(path.join(this.directory,'installation.json'),null);
+    if(!identity||identity.root!==this.root)return null;
+    const binding={installationId:identity.installationId,root:this.root,credentialEpoch:old.credentialEpoch??0,generation:selected.generation,activationEpoch:old.activationEpoch??0,profileDigest:selected.profileDigest,adapterDigest:selected.profile.adapterDigest};
+    if(canonical(binding)!==canonical(old.binding))return null;
+    // The immutable adapter snapshot must already exist; creating it is a write.
+    const hash=digest(canonical(selected.profile)),target=path.join(this.directory,'packages',hash);
+    if(!fs.existsSync(path.join(target,'profile.json')))return null;
+    const pinned={...selected,adapterRoot:path.join(target,'adapter')};
+    return {app,...pinned,binding:old.binding,effectiveCapabilities:this.effectiveCapabilities(pinned)};
+  }
+  // In-flight native requests hold a lease that blocks adapter activation. A lease
+  // on an unchanged selection is a small file of its own, so a native call needs
+  // neither the cross-process lock nor a rewrite of the shared state file.
+  // Ordering: a caller writes its lease and then checks for a transition; an
+  // activation records its transition and then checks the leases. At least one
+  // side therefore sees the other.
+  leaseDirectory(){return path.join(this.directory,'leases');}
+  writeLeaseFile(app,binding){
+    const id=crypto.randomUUID(),directory=this.leaseDirectory();fs.mkdirSync(directory,{recursive:true});
+    fs.writeFileSync(path.join(directory,id+'.json'),JSON.stringify({app,pid:process.pid,createdAt:this.now(),expiresAt:this.now()+120000,binding}),{flag:'wx',mode:0o600});
+    return id;
+  }
+  removeLeaseFile(id){
+    if(!/^[0-9a-f-]{36}$/.test(id??''))return false;
+    try{fs.unlinkSync(path.join(this.leaseDirectory(),id+'.json'));return true;}catch(error){if(error.code==='ENOENT')return false;throw error;}
+  }
+  // Live lease files for an app; expired leases and leases of dead processes are removed.
+  liveLeaseFiles(app){
+    let names=[];try{names=fs.readdirSync(this.leaseDirectory()).filter(name=>name.endsWith('.json'));}catch{return [];}
+    const live=[];
+    for(const name of names){
+      const file=path.join(this.leaseDirectory(),name);let item;
+      try{item=JSON.parse(fs.readFileSync(file,'utf8'));}catch{continue;}
+      if(item.expiresAt>this.now()&&this.alive(item.pid)){if(item.app===app)live.push(item);}
+      else{try{fs.unlinkSync(file);}catch{}}
+    }
+    return live;
+  }
   async resolve(app,capability,{pid,lease=false,probeRead=false}={}){
-    const inventory=await this.inventory();return this.locked(()=>{
+    const inventory=await this.inventory();
+    const unchanged=this.resolveUnchanged(app,capability,inventory,pid);
+    if(unchanged&&!lease)return unchanged;
+    if(unchanged&&lease){
+      const leaseId=this.writeLeaseFile(app,unchanged.binding);
+      let transition=true;try{transition=!!this.state().apps[app]?.transition;}catch{}
+      if(!transition)return {...unchanged,leaseId};
+      this.removeLeaseFile(leaseId); // A transition appeared: the locked path decides.
+    }
+    return this.locked(()=>{
       const state=this.state(),identity=this.identity();let selected;
       try{selected=this.evaluate(app,inventory,state);}catch(error){const old=state.apps[app]??{};state.apps[app]={...old,...error.runningBuild?{runningBuild:error.runningBuild,fileStamp:error.fileStamp,generation:error.generation}:{},phase:'blocked',blockedReason:error.code,lastError:error.message};this.save(state);throw error;}
       const old=state.apps[app]??{};
@@ -171,7 +235,7 @@ export class Compatibility {
       this.save(state,changed?{app,event:'selection',profileId:row.profileId,generation:row.generation,activationEpoch}:undefined);return result;
     });
   }
-  async release(id){return this.locked(()=>{const state=this.state();delete state.leases[id];this.save(state);});}
+  async release(id){if(this.removeLeaseFile(id))return;return this.locked(()=>{const state=this.state();delete state.leases[id];this.save(state);});}
   async confirmReadProbe(selection){
     const inventory=await this.inventory();
     return this.locked(()=>{
@@ -228,6 +292,8 @@ export class Compatibility {
       old.transition=transition;this.save(state,{app,event:'transition.prepared',id:transition.id});
     });
     try{
+      // The transition is recorded; lease files written before it are visible now.
+      if(this.liveLeaseFiles(app).length)throw compatError('REFRESH_DEFERRED_BUSY','Native requests are still in flight');
       const idle=await idleProbe?.(transition.previous);if(!idle?.authoritative||!idle.idle)throw compatError('REFRESH_DEFERRED_BUSY','Native global idle/approval state is not confirmed');
       const binding={...transition.previous.binding,activationEpoch:transition.previous.activationEpoch+1,profileDigest:transition.candidate.profileDigest,adapterDigest:transition.candidate.profile.adapterDigest};
       await this.locked(()=>{const state=this.state(),current=state.apps[app].transition;if(current?.id!==transition.id||current.runner?.id!==runner.id||current.phase!=='waitingIdle')throw compatError('CONFIG_EPOCH_CHANGED','Activation ownership changed');current.phase='attaching';current.binding=binding;this.save(state,{app,event:'transition.attaching',id:transition.id});});
