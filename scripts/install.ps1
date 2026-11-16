@@ -3,6 +3,8 @@ param(
     [string[]]$WritableRoots = @(),
     [string[]]$ProtectedThreads = @(),
     [switch]$WithDeepSeek,
+    [switch]$WithAntigravity,
+    [switch]$AntigravityIdentityHook,
     [switch]$CheckOnly
 )
 . (Join-Path $PSScriptRoot 'bridge-paths.ps1')
@@ -37,7 +39,7 @@ foreach ($name in @("DesktopSessionBridge-$suffix", "DesktopSessionBridge-$suffi
     }
 }
 # Fixed ports and native pipe names permit one installation per interactive user.
-$listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -ge 43127 -and $_.LocalPort -le 43133 })
+$listeners = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object { $_.LocalPort -ge 43127 -and $_.LocalPort -le 43134 })
 foreach ($listener in $listeners) {
     $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)"
     $owned = $owner -and $owner.CommandLine -and $owner.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0
@@ -52,6 +54,10 @@ foreach ($listener in $listeners) {
 if ($WithDeepSeek) {
     $profile = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.dsh/profiles/desktop/cordis.patch.yml'
     if (-not (Test-Path -LiteralPath $profile)) { throw 'Initialize DeepSeek Harness desktop profile before using -WithDeepSeek.' }
+}
+if ($WithAntigravity) {
+    $languageServer = Join-Path $env:LOCALAPPDATA 'Programs/antigravity/resources/bin/language_server.exe'
+    if (-not (Test-Path -LiteralPath $languageServer)) { throw 'Install Antigravity before using -WithAntigravity.' }
 }
 if (-not $CallerThread) {
     $connectionFile = Join-Path $root 'runtime/connection.json'
@@ -71,5 +77,11 @@ if ($WithDeepSeek) {
     & $python (SourceFile 'install-deepseek-plugin.py')
     if ($LASTEXITCODE -ne 0) { throw 'DeepSeek plugin installation failed.' }
 }
-& (SourceFile 'install-autostart.ps1') -WithoutDeepSeek:(-not $WithDeepSeek)
+if ($WithAntigravity) {
+    $pluginArgs = @((SourceFile 'install-antigravity-plugin.py'))
+    if ($AntigravityIdentityHook) { $pluginArgs += '--identity-hook' }
+    & $python @pluginArgs
+    if ($LASTEXITCODE -ne 0) { throw 'Antigravity plugin installation failed; inspect runtime/antigravity/plugin-backups.' }
+}
+& (SourceFile 'install-autostart.ps1') -WithoutDeepSeek:(-not $WithDeepSeek) -WithoutAntigravity:(-not $WithAntigravity)
 Write-Output 'Installation registered. Allow the supervisor to start, then run npm run status and verify native communication. Existing GUI sessions may need to reconnect their MCP worker.'
