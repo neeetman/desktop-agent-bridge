@@ -51,6 +51,8 @@ const SERVICES=[
   {name:'codex',script:'bridge.mjs',connection:'runtime/connection.json',http:true,app:'codex'},
   {name:'claude',script:'claude-bridge.mjs',connection:'runtime/claude/connection.json',http:true,app:'claude'},
   {name:'deepseek',script:'deepseek-bridge.mjs',connection:'runtime/deepseek/connection.json',http:true,app:'deepseek'},
+  // Bridge service only: the supervisor never launches or restarts the Antigravity desktop.
+  {name:'antigravity',script:'antigravity-bridge.mjs',connection:'runtime/antigravity/connection.json',http:true},
   {name:'router',script:'peer-router.mjs',connection:'runtime/router/connection.json',http:true},
 ];
 
@@ -58,7 +60,7 @@ export class Supervisor {
   constructor(){
     const previous=read(path.join(DIRECTORY,'state.json'),{});
     this.state={pid:process.pid,logonId,startedAt:new Date().toISOString(),lastTickAt:Date.now(),services:{},apps:{},paused:false,recoveries:previous.recoveries??0};
-    this.services=new Map(SERVICES.filter(service=>service.name!=='deepseek'||config.apps.deepseek).map(service=>[service.name,{...service,failures:0,restarts:previous.services?.[service.name]?.restarts??0,nextStart:0,startedAt:Date.now()}]));
+    this.services=new Map(SERVICES.filter(service=>(service.name!=='deepseek'||config.apps.deepseek)&&(service.name!=='antigravity'||config.services?.antigravity?.enabled)).map(service=>[service.name,{...service,failures:0,restarts:previous.services?.[service.name]?.restarts??0,nextStart:0,startedAt:Date.now()}]));
     this.apps=new Map(Object.entries(config.apps).map(([name,value])=>[name,restoreAppState(name,value,previous.apps,previous.logonId===logonId)]));
     this.ticking=false;this.lastDeepProbe=0;this.deepBusy=false;this.nativeFailures={codex:0,claude:0,deepseek:0};this.appWatcher=null;this.appWatcherKey='';
   }

@@ -4,7 +4,7 @@ export async function callPeerTool(name, args, { request, self, identity }) {
     case 'bridge_self': return identity(args);
     case 'bridge_list_threads': {
       const query = new URLSearchParams(Object.entries(args).filter(([k, v]) => k !== 'app' && v !== undefined));
-      const apps = args.app && args.app !== 'all' ? [args.app] : ['codex', 'claude', 'deepseek'];
+      const apps = args.app && args.app !== 'all' ? [args.app] : ['codex', 'claude', 'deepseek', 'antigravity'];
       const results = await Promise.allSettled(apps.map(async app => ({ app, ...await request('/v1/native', { app, route: `/v1/threads?${query}` }) })));
       return { results: results.map((r, i) => r.status === 'fulfilled' ? r.value : { app: apps[i], error: r.reason.message }) };
     }

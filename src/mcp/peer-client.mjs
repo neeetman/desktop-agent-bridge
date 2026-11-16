@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { lifecycle } from '../adapters/claude/claude-lifecycle.mjs';
 import { spawn } from 'node:child_process';
 import {publicResult,errorData} from '../core/collaboration.mjs';
+import {consumeBinding} from '../adapters/antigravity/antigravity-binding.mjs';
 const toolCatalogDigest=crypto.createHash('sha256').update(JSON.stringify(tools)).digest('hex');
 const installedRevision=()=>crypto.createHash('sha256').update(Buffer.concat(['peer-client.mjs','peer-catalog.mjs','peer-call.mjs','delegations.mjs'].map(name=>fs.readFileSync(projectURL(name))))).digest('hex').slice(0,16);
 const clientRevision=installedRevision();
@@ -48,9 +49,9 @@ async function request(route, body, method = 'POST') {
   const result = await response.json(); if (!response.ok) throw Object.assign(new Error(result.error ?? `Router HTTP ${response.status}`),{status:response.status,code:result.code}); return result;
 }
 function metaThread(meta = {}) {
-  return meta.thread_id ?? meta.threadId ?? meta['codex/threadId'] ?? meta['openai/threadId'] ?? meta['com.openai/threadId'];
+  return meta.thread_id ?? meta.threadId ?? meta['codex/threadId'] ?? meta['openai/threadId'] ?? meta['com.openai/threadId'] ?? meta['antigravity.google/conversation_id'];
 }
-async function identity(args, meta, related) {
+async function identity(args, meta, related, call) {
   const claudeHost = app === 'claude' && /^local_[a-f0-9-]{36}$/i.test(process.env.CLAUDE_CODE_HOST_SESSION_ID ?? '')
     ? process.env.CLAUDE_CODE_HOST_SESSION_ID : null;
   let threadId = claudeHost ?? metaThread(meta) ?? process.env.DESKTOP_BRIDGE_THREAD_ID;
@@ -59,15 +60,20 @@ async function identity(args, meta, related) {
   if (!threadId && app === 'claude') {
     try { const native = await lifecycle('identity', { payload: { pid: process.ppid } }); if (native.threadId) { threadId = native.threadId; evidence = native.evidence; } } catch {}
   }
+  if (!threadId && app === 'antigravity' && call) {
+    // One stdio server serves every Antigravity chat; the optional PreToolUse hook binds this exact call.
+    const bound = consumeBinding(fileURLToPath(projectURL('runtime/antigravity/hook-bindings/')), call.name, call.args);
+    if (bound?.conversationId) { threadId = bound.conversationId; evidence = 'antigravity-pretooluse-hook'; }
+  }
   if (!threadId && related?.to?.app === app) { threadId = related.to.threadId; evidence = 'addressed-message-context'; }
   if (threadId && args.fromThreadId && args.fromThreadId !== threadId) throw new Error('fromThreadId disagrees with the current runtime identity');
   if (!threadId && args.fromThreadId) { threadId = args.fromThreadId; evidence = 'explicit-current-thread'; }
-  if (!['codex', 'claude', 'deepseek'].includes(app)) throw new Error('MCP client app could not be identified; use --app codex|claude|deepseek');
+  if (!['codex', 'claude', 'deepseek', 'antigravity'].includes(app)) throw new Error('MCP client app could not be identified; use --app codex|claude|deepseek|antigravity');
   return { app, ...(threadId ? { threadId } : {}), evidence, needsThreadId: !threadId };
 }
-async function self(args, meta, related) { const who = await identity(args, meta, related); if (who.needsThreadId) throw new Error('Cannot safely identify this GUI chat. Supply fromThreadId using its exact current thread ID; do not use a recent-chat guess.'); return { app: who.app, threadId: who.threadId, identityEvidence: who.evidence }; }
+async function self(args, meta, related, call) { const who = await identity(args, meta, related, call); if (who.needsThreadId) throw new Error('Cannot safely identify this GUI chat. Supply fromThreadId using its exact current thread ID; do not use a recent-chat guess.'); return { app: who.app, threadId: who.threadId, identityEvidence: who.evidence }; }
 async function call(name, args, meta) {
-  const result=await callPeerTool(name, args, { request, self: (args, related) => self(args, meta, related), identity: args => identity(args, meta) });
+  const result=await callPeerTool(name, args, { request, self: (args, related) => self(args, meta, related, {name, args}), identity: args => identity(args, meta, undefined, {name, args}) });
   if(name==='bridge_self'){workerRecord('identity',{threadId:result.threadId??null});const installed=installedRevision();
     const current = installed === clientRevision;
     return {...result, worker:{toolCatalogDigest, clientRevision, installedRevision:installed,
@@ -86,8 +92,8 @@ lines.on('line', async line => {
     let result;
     if (message.method === 'initialize') {
       clientInfo = message.params?.clientInfo;
-      if (app === 'auto') { const name = (clientInfo?.name ?? '').toLowerCase(); app = name.includes('codex') ? 'codex' : name.includes('claude') ? 'claude' : name.includes('deepseek') ? 'deepseek' : 'auto'; }
-      diagnose({ event: 'initialize', app, clientName: clientInfo?.name, identityEnvKeys: Object.keys(process.env).filter(key => /(?:CODEX.*THREAD|CLAUDE.*SESSION)/.test(key)) });
+      if (app === 'auto') { const name = (clientInfo?.name ?? '').toLowerCase(); app = name.includes('codex') ? 'codex' : name.includes('claude') ? 'claude' : name.includes('deepseek') ? 'deepseek' : name.includes('antigravity') ? 'antigravity' : 'auto'; }
+      diagnose({ event: 'initialize', app, clientName: clientInfo?.name, identityEnvKeys: Object.keys(process.env).filter(key => /(?:CODEX.*THREAD|CLAUDE.*SESSION|ANTIGRAVITY)/.test(key)) });
       result = { protocolVersion: message.params?.protocolVersion ?? '2024-11-05', serverInfo: { name: 'desktop-bridge', version: '0.8.4' }, capabilities: { tools: {} }, instructions: 'Use bridge_self and exact peer IDs. The bridge is cross-app only: Claude to Claude and Codex to Codex sends, decisions and task creation are rejected; use the session messaging of that harness. Acknowledge read messages with bridge_ack; delivered is not consumed. Use bridge_reply once and include the task specification version. Never reply to expectReply=false notifications. Batch related review notes. Messages may enter an active chat; native acceptance is not consumption. Semantic decisions require bridge_request_decision: wait for the answer before changing that part. Replies and decision answers wake this same chat. bridge_create_task requires explicit human authorization for a new task; inspect bridge_projects/models/settings first. bridge_health supports opt-in failure/recovery notifications. ' + delegationInstructions };
     } else if (message.method === 'ping') result = {};
     else if (message.method === 'tools/list') {workerRecord('tools/list');result = { tools };}

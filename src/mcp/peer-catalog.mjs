@@ -1,12 +1,12 @@
 const string = { type: 'string' };
-const appField = { type: 'string', enum: ['codex', 'claude', 'deepseek'] };
+const appField = { type: 'string', enum: ['codex', 'claude', 'deepseek', 'antigravity'] };
 const identityFields = { fromThreadId: { ...string, description: 'Only needed when bridge_self cannot identify the current thread automatically. Never guess another chat ID.' } };
 const targetFields = { toApp: appField, toThreadId: string };
 const permissionFields={writableRoots:{type:'array',items:string,maxItems:32},sandboxMode:{type:'string',enum:['workspace-write','read-only','danger-full-access']},approvalPolicy:{type:'string',enum:['on-request','untrusted','never','on-failure']}};
 const tool = (name, description, properties, required = []) => ({ name, description, inputSchema: { type: 'object', properties, required, additionalProperties: false } });
 export const peerTools = [
   tool('bridge_self', 'Identify this desktop app and current GUI thread. Returns identity evidence or an explicit needsThreadId flag. Never infer identity from the most recent chat.', identityFields),
-  tool('bridge_list_threads', 'Find Claude/Codex/DeepSeek desktop GUI chats by title/project/status. Only use listed exact IDs.', { app: { type: 'string', enum: ['codex', 'claude', 'deepseek', 'all'] }, q: string, projectId: string, status: string, limit: { type: 'integer', minimum: 1, maximum: 50 } }),
+  tool('bridge_list_threads', 'Find Claude/Codex/DeepSeek/Antigravity desktop GUI chats by title/project/status. Only use listed exact IDs.', { app: { type: 'string', enum: ['codex', 'claude', 'deepseek', 'antigravity', 'all'] }, q: string, projectId: string, status: string, limit: { type: 'integer', minimum: 1, maximum: 50 } }),
   tool('bridge_read_thread', 'Read a desktop GUI chat and its recent messages.', targetFields, ['toApp', 'toThreadId']),
   tool('bridge_send', 'Cross-app only: same-app sends (Claude to Claude, Codex to Codex) are rejected; use the session messaging of that harness. Deliver authorized input to a desktop chat, including while active, using native steering or queueing. expectReply controls replies, not delivery timing. delivered is not consumed: wait for bridge_ack/reply. For important work supply a stable messageId. After a timeout query bridge_message with that ID before retrying identical input; batch review notes. expectReply=false forbids replies and auto-forwarding. For semantic decisions use bridge_request_decision and wait.', { ...targetFields, text: string, ...identityFields, messageId: string, expectReply: { type: 'boolean' },taskVersion:{...string,description:'Specification file path plus revision timestamp or SHA. Replies inherit it.'} }, ['toApp', 'toThreadId', 'text']),
   tool('bridge_reply', 'Reply once to a received message by its ID. The router returns it to the original sender automatically. Only use within the user-authorized coordination scope.', { messageId: string, text: string, ...identityFields }, ['messageId', 'text']),
@@ -20,7 +20,7 @@ export const peerTools = [
     stage:{type:'string',enum:['queued','waiting_for_adapter','waiting_for_contract','waiting_for_connection','dispatching','delivered','acknowledged','replied','unknown','failed','expired','interrupted']}
   }),
   tool('bridge_ack','Acknowledge that this chat read an exact message. Records the current native turn when observable; delivery alone never implies consumption.',{...identityFields,messageId:string},['messageId']),
-  tool('bridge_health','Probe real native connections, validated versions, last success and repair hints. subscribe=true opts this chat into one notification per failure/recovery transition; false unsubscribes. No repeated unchanged alerts.',{app:{type:'string',enum:['codex','claude','deepseek','all']},subscribe:{type:'boolean'},...identityFields}),
+  tool('bridge_health','Probe real native connections, validated versions, last success and repair hints. subscribe=true opts this chat into one notification per failure/recovery transition; false unsubscribes. No repeated unchanged alerts.',{app:{type:'string',enum:['codex','claude','deepseek','antigravity','all']},subscribe:{type:'boolean'},...identityFields}),
   tool('bridge_projects','List registered native desktop projects before choosing a projectId or cwd.',{app:appField}),
   tool('bridge_models','List current native model IDs and per-model efforts. Codex aliases include sol 6.1 and median. Never invent IDs.',{app:appField}),
   tool('bridge_capabilities','Read native bridge execution capabilities and backend limitations.',{app:appField}),

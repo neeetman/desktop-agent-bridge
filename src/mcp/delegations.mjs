@@ -13,6 +13,7 @@ const evidenceByApp = {
   claude: ['CLAUDE_CODE_HOST_SESSION_ID', 'desktop-native-worker-pid'],
   codex: ['MCP-call-metadata', 'CODEX_THREAD_ID'],
   deepseek: ['ToolExecution.agent.session.id'],
+  antigravity: ['MCP-call-metadata', 'antigravity-pretooluse-hook'],
 };
 
 export function verifiedPeer(from) {

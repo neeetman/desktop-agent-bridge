@@ -4,7 +4,7 @@ export function creationOrigin(prompt,key){
   const match=typeof prompt==='string'&&prompt.match(/^\[bridge (\{[^\n]+\})\](?:\r?\n|$)/);
   if(!match)return null;
   try{
-    const header=JSON.parse(match[1]),source=/^(codex|claude|deepseek):([^\s:]+)$/.exec(header.from??'');
+    const header=JSON.parse(match[1]),source=/^(codex|claude|deepseek|antigravity):([^\s:]+)$/.exec(header.from??'');
     if(header.kind!=='task_creation'||!source||typeof header.requestId!=='string'||key!==`mcp-create:${header.from}:${header.requestId}`)return null;
     return {app:source[1],threadId:source[2]};
   }catch{return null;}
