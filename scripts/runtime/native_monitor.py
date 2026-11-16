@@ -26,7 +26,15 @@ def monitor(app, launch=None):
     def write(file, value):
         temporary = directory / (file + '.tmp')
         temporary.write_text(json.dumps(value), encoding='utf8')
-        os.replace(temporary, directory / file)
+        # Windows refuses the replace while a reader briefly holds the file open.
+        for attempt in range(8):
+            try:
+                os.replace(temporary, directory / file)
+                return
+            except PermissionError:
+                if attempt == 7:
+                    raise
+                time.sleep(min(0.025 * 2 ** attempt, 0.4))
     write('connection.json', {'pid': os.getpid()})
     status_file = 'monitor-status.json' if app == 'codex' else 'status.json'
     previous_key, retry_at, failures = None, 0, 0

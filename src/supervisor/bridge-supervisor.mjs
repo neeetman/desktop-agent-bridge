@@ -11,12 +11,13 @@ import { codexMcp } from '../adapters/codex/codex-mcp-control.mjs';
 import { lifecycle } from '../adapters/claude/claude-lifecycle.mjs';
 import {coordinator} from '../compat/compatibility.mjs';
 import {activateProfile} from '../compat/native-management.mjs';
+import {writeJson} from '../lib/json-storage.mjs';
 
 const ROOT=fileURLToPath(projectURL(''));
 const DIRECTORY=sourcePath(ROOT,'runtime/supervisor');
 fs.mkdirSync(DIRECTORY,{recursive:true});
 const read=(file,fallback=null)=>{try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return fallback;}};
-const atomic=(file,value)=>{const temporary=file+'.tmp';fs.writeFileSync(temporary,JSON.stringify(value,null,2),{mode:0o600});fs.renameSync(temporary,file);};
+const atomic=(file,value)=>writeJson(file,value);
 const run=promisify(execFile);
 const quote=value=>"'"+value.replaceAll("'","''")+"'";
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
