@@ -7,6 +7,7 @@ conversation in tools/call params._meta. The optional PreToolUse hook
 import sys as _bridge_sys
 from pathlib import Path as _BridgePath
 _bridge_sys.path.insert(0, str(_BridgePath(__file__).resolve().parents[1] / 'lib'))
+_bridge_sys.path.insert(0, str(_BridgePath(__file__).resolve().parent))
 from bridge_paths import ROOT, source_file
 import argparse
 import datetime
@@ -15,11 +16,15 @@ import json
 import shutil
 from pathlib import Path
 
+import bridge_skill
+
 PLUGIN = 'desktop-agent-bridge'
 SERVER = 'desktop-bridge'
 MARKER = '.desktop-bridge-managed'
 HOOK_FILES = ['antigravity-hook.mjs', 'antigravity-binding.mjs']
-MANAGED = {'plugin.json', 'mcp_config.json', 'hooks.json', 'hook-config.json', MARKER, *HOOK_FILES}
+MANAGED = {'plugin.json', 'mcp_config.json', 'hooks.json', 'hook-config.json', MARKER, *HOOK_FILES, 'skills'}
+# Antigravity loads skills/<name>/SKILL.md from plugins; the bridge owns only its own skill there.
+SKILL_DIRECTORY = Path('skills') / bridge_skill.SKILL
 
 
 def client_revision(root):
@@ -52,6 +57,8 @@ def install(root, home, node, identity_hook=False, runtime=None):
         if not (target / MARKER).exists():
             raise RuntimeError(f'{target} exists and is not managed by desktop-agent-bridge; refusing to replace it')
         unknown = sorted(path.name for path in target.iterdir() if path.name not in MANAGED)
+        if (target / 'skills').exists():
+            unknown += sorted('skills/' + path.name for path in (target / 'skills').iterdir() if path.name != bridge_skill.SKILL)
         if unknown:
             raise RuntimeError(f'Managed plugin folder contains unknown files {unknown}; inspect it before updating')
     files = plugin_files(root, node, identity_hook)
@@ -64,14 +71,16 @@ def install(root, home, node, identity_hook=False, runtime=None):
         backup = runtime / 'plugin-backups' / stamp
         shutil.copytree(target, backup)
     target.mkdir(parents=True, exist_ok=True)
-    for name in MANAGED - set(files):
+    for name in MANAGED - set(files) - {'skills'}:
         (target / name).unlink(missing_ok=True)
     for name, data in files.items():
         temporary = target / (name + '.desktop-bridge.tmp')
         temporary.write_bytes(data)
         temporary.replace(target / name)
+    bridge_skill.write_skill(target / SKILL_DIRECTORY, bridge_skill.skill_files(root, stamp))
     proof = {'installedAt': stamp, 'plugin': str(target), 'server': f'{PLUGIN}_{SERVER}', 'identityHook': identity_hook,
-             'backupDirectory': str(backup) if backup else None, 'clientRevision': client_revision(root)}
+             'backupDirectory': str(backup) if backup else None, 'clientRevision': client_revision(root),
+             'skill': str(target / SKILL_DIRECTORY), 'skillRevision': bridge_skill.skill_revision(root)}
     runtime.mkdir(parents=True, exist_ok=True)
     (runtime / 'plugin-installation.json').write_text(json.dumps(proof, ensure_ascii=False, indent=2), encoding='utf8')
     return proof

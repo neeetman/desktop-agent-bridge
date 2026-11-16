@@ -49,7 +49,7 @@ python -m pip install -r requirements.txt
 .\scripts\install.ps1 -CallerThread "<existing-codex-chat-id>" -WritableRoots "C:\Work"
 ```
 
-The installer merges one `desktop-bridge` MCP entry, backs up existing configuration, and registers per-user startup and recovery tasks. It preserves other MCP servers and local execution policies. Add `-WithDeepSeek` after initializing the DeepSeek Harness desktop profile. Add `-WithAntigravity` to install the Antigravity plugin and its bridge service (see [Antigravity](docs/antigravity.md)). Add `-ProtectedThreads @("<important-chat-id>")` to protect critical chats.
+The installer merges one `desktop-bridge` MCP entry, installs the `desktop-bridge` skill (the communication guide) for Claude, Codex, DeepSeek Harness and Antigravity, backs up existing configuration, and registers per-user startup and recovery tasks. It preserves other MCP servers and local execution policies. Add `-WithDeepSeek` after initializing the DeepSeek Harness desktop profile. Add `-WithAntigravity` to install the Antigravity plugin and its bridge service (see [Antigravity](docs/antigravity.md)). Add `-ProtectedThreads @("<important-chat-id>")` to protect critical chats.
 
 `-WritableRoots` controls additional writable directories; it is optional. The initial execution default is `workspace-write` with `on-request` approval. Full access requires an explicit request.
 
@@ -123,6 +123,7 @@ src/
   core/                 HTTP tasks, contracts, signals, execution policy
   adapters/             Codex, Claude, DeepSeek, and Antigravity native integrations
   mcp/                  MCP clients, tool catalog, message/decision router
+  skills/               The desktop-bridge skill installed into each app
   compat/               Build selection, helper identity, activation/recovery
   supervisor/           Windows service supervision and recovery policy
   cli/                  CLI commands

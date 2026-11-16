@@ -15,7 +15,7 @@ function fixture() {
     return { thread: { status: { type: busy ? 'active' : 'idle' } },turns:nativeTurn?[{id:nativeTurn,status:'inProgress'}]:[] };
   };
   let healthNow=Date.parse('2026-11-01T00:00:00Z');
-  const router = new PeerRouter({ directory, backendRequest, pollMs: 1e9, healthOptions:{now:()=>healthNow} });
+  const router = new PeerRouter({ directory, backendRequest, pollMs: 1e9, healthOptions:{now:()=>healthNow}, skillState:()=>({state:'missing'}) });
   const tick = router.tick.bind(router); router.tick = async () => {};
   return { router, tick, sends, backendRequest, directory, advanceHealth(){healthNow+=30000;}, setBusy(value) { busy = value; }, setUnknown(value) { unknown = value; },setTask(value){taskStatus=value;},setTurn(value){nativeTurn=value;}, close() { router.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
 }
