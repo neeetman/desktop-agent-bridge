@@ -9,6 +9,8 @@ module.exports = function operations(config, req) {
     config.runId,
     config.app,
   );
+  // Validation chats run on the cheapest suitable models; the readback must match.
+  const CODEX_MODEL = "gpt-6.1-terra", CODEX_EFFORT = "low", CLAUDE_MODEL = "claude-haiku-5-5";
   let created, connection, manager;
   const used = new Set();
   const title = "Bridge capability test " + config.runId.slice(0, 8);
@@ -79,8 +81,8 @@ module.exports = function operations(config, req) {
           collaborationMode: {
             mode: "default",
             settings: {
-              model: "gpt-6-luna",
-              reasoning_effort: "low",
+              model: CODEX_MODEL,
+              reasoning_effort: CODEX_EFFORT,
               developer_instructions: null,
             },
           },
@@ -130,8 +132,8 @@ module.exports = function operations(config, req) {
       )
         throw Error("Created Codex chat identity or workspace mismatch");
       const chat = manager.getConversation(created);
-      if (chat?.latestModel !== "gpt-6-luna" || chat?.latestReasoningEffort !== "low")
-        throw Error("Codex validation chat did not confirm Luna / low; inspect before retrying");
+      if (chat?.latestModel !== CODEX_MODEL || chat?.latestReasoningEffort !== CODEX_EFFORT)
+        throw Error("Codex validation chat did not confirm " + CODEX_MODEL + " / " + CODEX_EFFORT + "; inspect before retrying");
       return { threadId: created, cwd, model: chat.latestModel, reasoningEffort: chat.latestReasoningEffort };
     }
     if (method === "permissions") {
@@ -293,11 +295,7 @@ module.exports = function operations(config, req) {
       workspace();
       const list = await renderer("getSessionList", []);
       const before = new Set(list.sessions.map((s) => s.sessionId));
-      const model =
-        session?.model ||
-        list.sessions.find((s) => !s.isArchived && /haiku/i.test(s.model ?? ""))?.model ||
-        list.sessions.find((s) => !s.isArchived && s.model)?.model;
-      if (!model) throw Error("No desktop model available");
+      const model = CLAUDE_MODEL;
       const result = await renderer("start", [
         {
           cwd,
@@ -317,8 +315,10 @@ module.exports = function operations(config, req) {
         path.resolve(row.originCwd || row.cwd) !== path.resolve(cwd)
       )
         throw Error("Claude chat workspace readback failed");
+      if (row.model && row.model !== CLAUDE_MODEL)
+        throw Error("Claude validation chat did not confirm " + CLAUDE_MODEL + "; inspect before retrying");
       created = id;
-      return { threadId: id, cwd };
+      return { threadId: id, cwd, model: row.model ?? CLAUDE_MODEL };
     }
     if (method === "mcp") {
       if (

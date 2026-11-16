@@ -12,10 +12,10 @@ import {
   verifyFullAccess,
 } from "../../src/compat/capability-checks.mjs";
 
-test("Codex validation overrides desktop model defaults with Luna / low and verifies readback", async t => {
+test("Codex validation overrides desktop model defaults with Terra / low and verifies readback", async t => {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'canary-model-'));
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
-  let selected, observed={latestModel:'gpt-6-luna',latestReasoningEffort:'low'},starts=0;
+  let selected, observed={latestModel:'gpt-6.1-terra',latestReasoningEffort:'low'},starts=0;
   const config={root,app:'codex',runId:'model-test',adapterRoot:root,expiresAt:Date.now()+10000};
   const req=name=>name===path.join(root,'execution-policy.cjs') ? {nativePermissions:()=>({}),nativeConfig:()=>({})} : createRequire(import.meta.url)(name);
   const fixture=()=>{
@@ -29,13 +29,13 @@ test("Codex validation overrides desktop model defaults with Luna / low and veri
     return ops;
   };
   const evidence=await fixture().codex('create');
-  assert.equal(selected.collaborationMode.settings.model,'gpt-6-luna');
+  assert.equal(selected.collaborationMode.settings.model,'gpt-6.1-terra');
   assert.equal(selected.collaborationMode.settings.reasoning_effort,'low');
-  assert.equal(evidence.model,'gpt-6-luna');
+  assert.equal(evidence.model,'gpt-6.1-terra');
   assert.equal(evidence.reasoningEffort,'low');
   observed={latestModel:'gpt-6.1-sol',latestReasoningEffort:'high'};
   const mismatch=fixture();
-  await assert.rejects(mismatch.codex('create'),/did not confirm Luna/);
+  await assert.rejects(mismatch.codex('create'),/did not confirm gpt-6.1-terra/);
   await assert.rejects(mismatch.codex('create'),/already attempted/);
   assert.equal(starts,2);
 });
@@ -146,6 +146,8 @@ test("Claude can create a validation chat without a previous session or touching
     if (method === "start") {
       starts++;
       assert.equal(args[0].cwd, cwd);
+      // Never borrows the model of another open chat (here a protected one).
+      assert.equal(args[0].model, "claude-haiku-5-5");
       assert.match(args[0].message, /bridge_ack and, when requested, bridge_reply/);
       return { sessionId: "new-chat" };
     }
@@ -153,7 +155,7 @@ test("Claude can create a validation chat without a previous session or touching
     assert.deepEqual(args, ["new-chat"]);
     return { sessionId: "new-chat", cwd };
   };
-  assert.deepEqual(await fixture.claude("create", renderer, null, null), { threadId: "new-chat", cwd });
+  assert.deepEqual(await fixture.claude("create", renderer, null, null), { threadId: "new-chat", cwd, model: "claude-haiku-5-5" });
   assert.equal(fixture.threadId(), "new-chat");
   await assert.rejects(fixture.claude("create", renderer, null, null), /already attempted/);
   assert.equal(starts, 1);
