@@ -107,3 +107,13 @@ test('concurrent activation requests cannot both replace helpers',async()=>{cons
 test('a contract circuit blocks only the affected capability and resets with a new desktop generation',async()=>{const f=fixture();try{const selected=await f.manager.resolve('codex','send');await f.manager.trip('codex','send',selected.binding);await assert.rejects(f.manager.resolve('codex','send'),{code:'CONTRACT_MISMATCH'});await f.manager.resolve('codex','read');f.inventory().processes[0].createdAt='fresh';await f.manager.resolve('codex','send');}finally{f.close();}});
 test('a failure after native thread creation cannot be reported as a safe unsent creation',async()=>{let creates=0;const tools=new DesktopTools('fixture','caller',{guardRuntime:async(_app,_cap,fn)=>fn({binding:{generation:'fixture',activationEpoch:1}}),executionRuntime:{ensureExecution:async()=>{},executionRpc:async method=>{if(method==='create'){creates++;return {threadId:'native-created'};}}}});tools.rawCall=async()=>{throw compatError('CONTRACT_MISMATCH','readback changed');};await assert.rejects(tools.call('create_thread',{executionPolicy:{sandboxMode:'read-only'},requestId:'fixture',target:{type:'projectless'},prompt:'test'}),error=>error.dispatchNotStarted===false&&error.createdThreadId==='native-created');assert.equal(creates,1);});
 test('global idle inventory includes every loaded-thread page and refuses broken pagination',async()=>{const cursors=[];const ids=await bindingModule.loadedThreadIds({sendAppServerRequest:async(method,args)=>{assert.equal(method,'thread/loaded/list');cursors.push(args.cursor);return args.cursor===null?{data:['idle-first-page'],nextCursor:'page2'}:{data:['busy-second-page'],nextCursor:null};}});assert.deepEqual(ids,['idle-first-page','busy-second-page']);assert.deepEqual(cursors,[null,'page2']);await assert.rejects(bindingModule.loadedThreadIds({sendAppServerRequest:async()=>({data:[],nextCursor:'same'})}),{code:'CONTRACT_MISMATCH'});});
+
+test('a new process selects the most capable validated profile, not the first imported',async()=>{const f=fixture();try{
+  // An older, less capable profile listed first (as an earlier import would be).
+  const lesser={...f.profile,id:'test-v0',capabilities:['read','send']};
+  atomicJson(sourcePath(f.root,'compat/lesser.json'),lesser);
+  atomicJson(sourcePath(f.root,'compat/catalog.json'),{schemaVersion:1,profiles:['compat/lesser.json','compat/profile.json']});
+  const result=await f.manager.doctor('codex');assert.equal(result.apps.codex.profileId,'test-v1');
+  // A revoked capable profile is never preferred.
+  f.update({revoked:true});const fallback=await f.manager.doctor('codex');assert.equal(fallback.apps.codex.profileId,'test-v0');
+}finally{f.close();}});
