@@ -156,7 +156,7 @@ export class DesktopTools {
     if(execution.model)execution.model=resolveSelection(await this.listModels(),execution.model,execution.effort);
     execution.executionPolicy=executionPolicy;
     await this.guardRuntime('codex','execution',async selection=>{
-      if(selection.profile?.coreApiVersion===2)checkExecutionOperation(selection.effectiveCapabilities??selection.profile.capabilities,'create',executionPolicy);
+      if(selection.profile?.coreApiVersion===2)checkExecutionOperation(selection.effectiveCapabilities??selection.profile.capabilities,'create',executionPolicy,executionPolicy?.sandboxMode==='danger-full-access'&&policy.readSettings().allowFullAccess===true);
     });
     // Resolve compatibility before bridge.mjs reserves an idempotency record.
     await this.checkExecutionReady();

@@ -9,7 +9,36 @@ import {
   probeCapabilities,
   certifiedCapabilities,
   checkExecutionOperation,
+  verifyFullAccess,
 } from "../../src/compat/capability-checks.mjs";
+
+test("Codex validation overrides desktop model defaults with Luna / low and verifies readback", async t => {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'canary-model-'));
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  let selected, observed={latestModel:'gpt-6-luna',latestReasoningEffort:'low'},starts=0;
+  const config={root,app:'codex',runId:'model-test',adapterRoot:root,expiresAt:Date.now()+10000};
+  const req=name=>name===path.join(root,'execution-policy.cjs') ? {nativePermissions:()=>({}),nativeConfig:()=>({})} : createRequire(import.meta.url)(name);
+  const fixture=()=>{
+    const ops=operations(config,req);
+    ops.bound({}, {
+      settings:{},
+      startConversation:async args=>{starts++;selected=args;return {status:'created',conversationId:'dedicated'};},
+      readThread:async()=>({thread:{id:'dedicated',cwd:path.join(root,'runtime/canary-workspaces/model-test/codex')}}),
+      getConversation:()=>observed,
+    });
+    return ops;
+  };
+  const evidence=await fixture().codex('create');
+  assert.equal(selected.collaborationMode.settings.model,'gpt-6-luna');
+  assert.equal(selected.collaborationMode.settings.reasoning_effort,'low');
+  assert.equal(evidence.model,'gpt-6-luna');
+  assert.equal(evidence.reasoningEffort,'low');
+  observed={latestModel:'gpt-6.1-sol',latestReasoningEffort:'high'};
+  const mismatch=fixture();
+  await assert.rejects(mismatch.codex('create'),/did not confirm Luna/);
+  await assert.rejects(mismatch.codex('create'),/already attempted/);
+  assert.equal(starts,2);
+});
 
 test("a failed creation excludes permissions, but an independent reload still runs", async () => {
   const calls = [],
@@ -36,6 +65,25 @@ test("a failed creation excludes permissions, but an independent reload still ru
     "mcp",
   ]);
   assert.equal(checks.permissions.status, "skipped");
+});
+test("full access needs local opt-in, verified permission methods and native readback", () => {
+  const full = { sandboxMode: "danger-full-access", approvalPolicy: "never", writableRoots: [] };
+  const caps = ["create", "permissions"];
+  assert.throws(() => checkExecutionOperation(caps, "create", full), { code: "CAPABILITY_UNSUPPORTED" });
+  assert.throws(() => checkExecutionOperation(["create"], "create", full, true), { code: "CAPABILITY_UNSUPPORTED" });
+  assert.throws(() => checkExecutionOperation(caps, "prepare", { ...full, approvalPolicy: "on-request" }, true), { code: "CAPABILITY_UNSUPPORTED" });
+  assert.throws(() => checkExecutionOperation(caps, "set_permissions", { ...full, writableRoots: ["extra"] }, true), { code: "CAPABILITY_UNSUPPORTED" });
+  checkExecutionOperation(caps, "create", full, true);
+  checkExecutionOperation(caps, "prepare", full, true);
+  checkExecutionOperation(caps, "set_permissions", full, true);
+  const execution = { nextTurnPermissions: full };
+  const created = { threadId: "new-chat", execution };
+  assert.equal(verifyFullAccess("create", created), created);
+  assert.equal(verifyFullAccess("prepare", execution), execution);
+  assert.equal(verifyFullAccess("set_permissions", { nativeExecution: execution }).nativeExecution, execution);
+  assert.throws(() => verifyFullAccess("create", { threadId: "new-chat" }), {
+    code: "EXECUTION_READBACK_MISMATCH", createdThreadId: "new-chat",
+  });
 });
 test("verified permission changes only apply within the accepted sandbox modes", () => {
   const input = {
