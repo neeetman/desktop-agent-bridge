@@ -343,7 +343,7 @@ if (!app.requestSingleInstanceLock()) {
           app:worker.app, pid:worker.pid, threadId:worker.threadId, revision:worker.clientRevision
         })),
         installedRevision: createHash('sha256').update(Buffer.concat(await Promise.all(
-          ['peer-client.mjs','peer-catalog.mjs','peer-call.mjs'].map(file => fs.readFile(path.join(root,'src/mcp',file)))
+          ['peer-client.mjs','peer-catalog.mjs','peer-call.mjs','delegations.mjs'].map(file => fs.readFile(path.join(root,'src/mcp',file)))
         ))).digest('hex').slice(0,16),
         deepseek: !!deepseek?.ok,
         profiles: profiles.profiles
@@ -375,6 +375,27 @@ if (!app.requestSingleInstanceLock()) {
         await cli("compat","import",result.package);
         return "已导入 "+result.profileId+"（"+summary+"）。请选择“空闲时激活”以附着并检查就绪状态。报告 "+result.report;
       } finally {updating=null;}
+    });
+    // MCP + skill setup. Every config write happens in scripts/install/setup-apps.py, run
+    // here in the main process: "plan" previews exact diffs, "apply" writes them (with
+    // backups) only if the plan still matches the previewed planId.
+    bind("setup", async (action, planId) => {
+      const settings = await config();
+      const setup = (...args) => run(settings.python || "python",
+        [path.join(root, "scripts/install/setup-apps.py"), ...args, ...(settings.node ? ["--node", settings.node] : [])]);
+      if (action === "plan") return setup("plan");
+      if (action === "apply") {
+        if (typeof planId !== "string" || !/^[0-9a-f]{16}$/.test(planId)) throw Error("Invalid plan ID");
+        beginMaintenance("安装/更新 MCP 配置与 skill");
+        try { return await setup("apply", "--plan-id", planId); }
+        finally { updating = null; }
+      }
+      if (action === "reload-codex") {
+        beginMaintenance("重新加载 Codex MCP");
+        try { return await cli("compat", "refresh-mcp", "--app", "codex"); }
+        finally { updating = null; }
+      }
+      throw Error("Unknown setup action");
     });
     bind("canary-watch",async (enabled)=>{
       const prefs=await watchSettings();

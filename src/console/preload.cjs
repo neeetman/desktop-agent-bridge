@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("bridge", {
   canaryWatch: (enabled) => ipcRenderer.invoke("bridge:canary-watch",enabled),
   update: (action, app, profile) =>
     ipcRenderer.invoke("bridge:update", action, app, profile),
+  setup: (action, planId) => ipcRenderer.invoke("bridge:setup", action, planId),
   theme: (value) => ipcRenderer.invoke("bridge:theme", value),
   copy: (value) => ipcRenderer.invoke("bridge:copy", value),
 });

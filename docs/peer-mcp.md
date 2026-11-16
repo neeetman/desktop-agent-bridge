@@ -17,6 +17,14 @@ Codex、Claude 和 Antigravity 使用 `peer-client.mjs` 的 stdio MCP；DeepSeek
 
 路由器在投递时检查收件应用的副本：`current` 时消息不再附 `桌面通信指南：<路径>`；缺失、过期或被改动时仍附该行作为回退，指向由 skill 正文生成的 `runtime/router/peer-guide-v2.md`。已启动的会话要在新会话或重新加载 skill 后才会看到新版本。
 
+### 控制台「接入」页：一键安装或更新 MCP 与 skill
+
+控制台的「接入」页按应用列出 MCP 配置里的 `DESKTOP_BRIDGE_CLIENT_REVISION` 与当前客户端版本（`peer-client.mjs`、`peer-catalog.mjs`、`peer-call.mjs`、`delegations.mjs` 的 sha256 前 16 位），以及 skill 副本版本与当前版本，下面列出将要做的每项改动及其 unified diff。「全部安装 / 更新」在主进程里运行 `scripts/install/setup-apps.py apply --plan-id <预览 ID>`：预览后任何配置变化都会使预览 ID 失效并拒绝写入。命令行同样可用：`python scripts/install/setup-apps.py plan` 只读预览，`apply --plan-id` 写入。
+
+写入只动 desktop-bridge 自己的键：Codex `config.toml` 逐行修改 `command`、`args` 与 `env.DESKTOP_BRIDGE_CLIENT_REVISION`，无论 env 是内联表还是 `[mcp_servers.desktop-bridge.env]` 子表，`[mcp_servers.desktop-bridge.tools.*]` 的 `approval_mode`、注释和其他表逐字保留；`.claude.json` 只改该条目，保留原有换行风格与 `cmd /c node.exe …\peer-client.mjs` 这类包装启动方式。Antigravity 插件按原有的身份钩子设置重写；检测到 cc-switch 时同步其登记。配置备份在 `runtime/mcp-config-backups/`，skill 备份在 `runtime/skill-backups/`，插件备份在 `runtime/antigravity/plugin-backups/`。
+
+写入配置不会改变已启动的 MCP 进程：页面提供「重新加载 Codex MCP」（即 `compat refresh-mcp --app codex`，全局操作，有会话运行、待审批或受保护时推迟；Codex 检测到配置变化后也会在空闲时自行重载）；Claude 会话在重新连接 desktop-bridge 时使用新客户端。
+
 ## 路由和回复
 
 先调用 `bridge_self` 确认本机当前会话。调用 `bridge_list_threads` 按完整标题、项目、状态查询；只有确认唯一目标后，才使用 `{toApp, toThreadId}` 发送。标题支持检索，但不是唯一标识，不能作为 `toThreadId`。

@@ -15,6 +15,7 @@ const icons = {
   check: '<path d="m5 12 4 4 10-10"/>',
   alert: '<path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4m0 3v.5"/>',
   minus: '<circle cx="12" cy="12" r="8"/><path d="M8 12h8"/>',
+  plug: '<path d="M9 3v5m6-5v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
 };
 const icon = (name) =>
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + icons[name] + "</svg>";
@@ -89,12 +90,14 @@ const PAGES = {
   messages: ["消息", "跨会话投递记录与回执"],
   compat: ["适配", "桌面构建与适配包、能力验收"],
   health: ["健康", "健康探测与后台服务"],
+  setup: ["接入", "各应用的 MCP 配置与 desktop-bridge skill"],
   settings: ["设置", "外观与启动偏好"],
 };
 
 const state = {
   page: "overview", rows: [], index: 0, selected: null, filter: "", busy: false,
   snapshot: null, queueError: "", adapterError: "", certifyApp: null, maintenance: null,
+  setup: null, setupError: "", setupLoading: false,
 };
 let watching = false;
 // Console maintenance (manual or automatic validation, imports, activation) runs one at a time in
@@ -437,6 +440,146 @@ function renderHealth() {
       '<div class="probe-steps">' + stepRows + "</div>" + issueHtml(id, issue) + "</article>";
   }).join("");
 }
+/* ---------- MCP + skill setup ---------- */
+const short = (rev) => (rev ? String(rev).slice(0, 8) : "—");
+// Paths under the user's home are shown as ~\...; the full path stays in the tooltip.
+const tilde = (file) => {
+  const home = state.setup?.home;
+  return home && file && String(file).toLowerCase().startsWith(home.toLowerCase()) ? "~" + String(file).slice(home.length) : String(file ?? "");
+};
+const pathCode = (file) => '<code title="' + esc(file) + '">' + esc(tilde(file)) + "</code>";
+const MCP_STATES = {
+  current: ["已是当前版本", "ok"], outdated: ["需要更新", "warn"], missing: ["未配置", "warn"], unreadable: ["无法读取", "bad"],
+  "not-installed": ["插件未安装", "idle"], "not-applicable": ["不适用", "idle"],
+};
+const SKILL_STATES = {
+  current: ["已是当前版本", "ok"], outdated: ["需要更新", "warn"], missing: ["未安装", "warn"], modified: ["被改动", "warn"], unmanaged: ["同名 skill 非本项目", "bad"],
+};
+const SKILL_TARGETS = { claude: "~/.claude/skills", agents: "~/.agents/skills（Codex 与 DeepSeek 共用）", antigravity: "Antigravity 插件 skills/" };
+const CHANGE_TITLES = {
+  "mcp-config": (c) => appName(c.app) + " MCP 配置",
+  "cc-switch": () => "cc-switch 登记",
+  "antigravity-plugin": () => "Antigravity 插件（MCP 与 skill）",
+  skill: (c) => "desktop-bridge skill · " + (SKILL_TARGETS[c.target] ?? c.target),
+};
+function setupPending(plan) {
+  return (plan?.changes ?? []).length;
+}
+function versionCell(states, row, configured, current) {
+  const [label, tone] = states[row?.state] ?? [row?.state ?? "未知", "idle"];
+  const pending = row?.pending && row.state === "current" ? badge("warn", "路径待更新") : "";
+  const versions = configured || row?.state === "outdated" || row?.state === "current"
+    ? '<div class="setup-versions"><code>' + esc(short(configured)) + "</code> → <code>" + esc(short(current)) + "</code></div>" : "";
+  return badge(tone, label) + pending + (row?.ccSwitchPending ? badge("warn", "cc-switch 待同步") : "") + versions +
+    (row?.error ? '<div class="err">' + esc(row.error) + "</div>" : "") + (row?.note ? '<div class="muted small">' + esc(row.note) + "</div>" : "");
+}
+function diffHtml(diff) {
+  const lines = String(diff ?? "").replace(/\n$/, "").split(/\r?\n/).map((line) => {
+    const cls = line.startsWith("+++") || line.startsWith("---") ? "meta" : line.startsWith("@@") ? "hunk" : line.startsWith("+") ? "add" : line.startsWith("-") ? "del" : "";
+    return '<span class="' + cls + '">' + esc(cls === "meta" ? line.slice(0, 4) + tilde(line.slice(4)) : line) + "</span>";
+  });
+  return '<pre class="diff">' + lines.join("\n") + "</pre>";
+}
+function changeHtml(change) {
+  const title = (CHANGE_TITLES[change.kind] ?? (() => change.kind))(change);
+  let body = "";
+  if (change.kind === "skill") {
+    body = '<p class="muted small">' + esc({ create: "新建", "backup-and-replace": "备份后替换" }[change.action] ?? change.action) + " · " +
+      esc(SKILL_STATES[change.state]?.[0] ?? change.state) + " · <code>" + esc(short(change.installedRevision)) + "</code> → <code>" + esc(short(change.revision)) + "</code><br>" + pathCode(change.path) + "</p>";
+  } else {
+    body = (change.summary ? '<p class="muted small">' + esc(change.summary) + "</p>" : "") + diffHtml(change.diff);
+  }
+  return '<details class="setup-change"' + (change.kind === "skill" ? "" : " open") + "><summary><b>" + esc(title) + '</b> <span class="muted small">' + esc(tilde(change.path)) + "</span></summary>" + body + "</details>";
+}
+function renderSetup() {
+  const plan = state.setup;
+  const pending = setupPending(plan), errorsList = plan?.errors ?? [];
+  const tone = state.setupError || errorsList.length ? "bad" : !plan ? "idle" : pending ? "warn" : "ok";
+  const title = state.setupError ? "无法检查接入配置" : !plan ? (state.setupLoading ? "正在检查接入配置…" : "尚未检查") :
+    errorsList.length ? "有配置无法自动处理" : pending ? pending + " 项待安装或更新" : "MCP 配置与 skill 均为当前版本";
+  const apps = plan ? Object.values(plan.apps) : [];
+  const mcpCurrent = apps.filter((a) => a.mcp.state === "current" && !a.mcp.pending).length, mcpTotal = apps.filter((a) => !["not-applicable", "not-installed"].includes(a.mcp.state)).length;
+  const skillCurrent = apps.filter((a) => a.skill.state === "current").length;
+  $("setup-summary").innerHTML =
+    '<div class="headline ' + tone + '"><span class="glyph">' + icon(tone === "ok" ? "check" : tone === "idle" ? "minus" : "alert") + "</span><div><b>" + esc(title) + "</b><small>" +
+    esc(state.setupError || (plan ? "检查于 " + time(plan.checkedAt) : "打开本页时检查")) + "</small></div></div>" +
+    '<div class="kpi"><span>当前客户端版本</span><b class="mono">' + esc(short(plan?.clientRevision)) + "</b></div>" +
+    '<div class="kpi"><span>当前 skill 版本</span><b class="mono">' + esc(short(plan?.skillRevision)) + "</b></div>" +
+    '<div class="kpi' + (plan && (mcpCurrent < mcpTotal || skillCurrent < apps.length) ? " warn" : "") + '"><span>已是当前版本</span><b>' +
+    (plan ? mcpCurrent + "<small> / " + mcpTotal + " MCP</small> · " + skillCurrent + "<small> / " + apps.length + " skill</small>" : "—") + "</b></div>";
+  const order = ORDER.filter((id) => plan?.apps?.[id]);
+  $("setup-rows").innerHTML = order.map((id) => {
+    const row = plan.apps[id];
+    const where = [row.mcp.file, row.skill.path].filter(Boolean).map(pathCode).join("<br>");
+    const skillVersions = { ...row.skill, pending: false };
+    return "<tr><td>" + monogram(id) + " <b>" + esc(appName(id)) + "</b></td><td>" + versionCell(MCP_STATES, row.mcp, row.mcp.configuredRevision, row.mcp.currentRevision) +
+      "</td><td>" + versionCell(SKILL_STATES, skillVersions, row.skill.installedRevision, row.skill.revision) +
+      (row.skill.action === "skip" ? '<div class="muted small">' + esc(row.skill.reason ?? "") + "</div>" : "") + '</td><td class="setup-where">' + where + "</td></tr>";
+  }).join("") || '<tr><td colspan="4" class="empty">' + (state.setupLoading ? "正在检查…" : "没有数据") + "</td></tr>";
+  $("setup-changes").innerHTML = errorsList.map((e) => '<p class="detail-error">' + esc(e) + "</p>").join("") +
+    ((plan?.changes ?? []).map(changeHtml).join("") || (plan ? '<p class="empty">没有需要改动的内容。</p>' : ""));
+  $("setup-apply").disabled = locked() || state.setupLoading || !pending || errorsList.length > 0;
+  $("setup-apply").textContent = pending ? "全部安装 / 更新（" + pending + " 项）" : "全部安装 / 更新";
+  $("setup-reload-codex").disabled = locked();
+  $("setup-check").disabled = state.setupLoading || locked();
+}
+async function loadSetup() {
+  if (state.setupLoading) return;
+  state.setupLoading = true;
+  renderSetup();
+  try {
+    const plan = await window.bridge.setup("plan");
+    state.setup = { ...plan, checkedAt: new Date().toISOString() };
+    state.setupError = "";
+  } catch (e) {
+    state.setupError = e.message;
+  } finally {
+    state.setupLoading = false;
+    render();
+  }
+}
+$("setup-check").onclick = () => { $("setup-result").textContent = ""; loadSetup(); };
+$("setup-apply").onclick = async () => {
+  if (locked() || !state.setup) return;
+  state.busy = true;
+  syncMaintenanceControls();
+  render();
+  $("setup-result").textContent = "正在写入配置与 skill…";
+  try {
+    const result = await window.bridge.setup("apply", state.setup.planId);
+    state.setup = { ...result.status, checkedAt: new Date().toISOString() };
+    const backups = [result.results?.mcp?.backupDirectory, result.results?.antigravity?.backupDirectory].filter(Boolean);
+    $("setup-result").textContent = "已应用 " + result.applied + " 项改动。" + (backups.length ? "备份：" + backups.map(tilde).join("、") + "。" : "") +
+      (result.status.changes.length ? "仍有 " + result.status.changes.length + " 项未完成，请检查。" : "下一步：让已运行的会话加载新配置。");
+    if (result.results?.mcp) $("setup-reload").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    $("setup-result").textContent = e.message;
+    state.setup = null;
+    void loadSetup();
+  } finally {
+    state.busy = false;
+    syncMaintenanceControls();
+    render();
+  }
+};
+$("setup-reload-codex").onclick = async () => {
+  if (locked()) return;
+  state.busy = true;
+  syncMaintenanceControls();
+  render();
+  $("setup-reload-result").textContent = "正在请求 Codex 全局重载 MCP…";
+  try {
+    const result = await window.bridge.setup("reload-codex");
+    $("setup-reload-result").textContent = "Codex 已重新加载 MCP" + (result?.reloads ? "（第 " + result.reloads + " 次）" : "") + "。各会话下一次调用 bridge_self 时可核验新的客户端版本。";
+  } catch (e) {
+    $("setup-reload-result").textContent = "未能重载：" + e.message + "。有会话运行中、待审批或存在受保护会话时会推迟，空闲后再试。";
+  } finally {
+    state.busy = false;
+    syncMaintenanceControls();
+    render();
+  }
+};
+
 function renderNav() {
   const ids = appIds(), diagnoses = ids.map(diagnose);
   const appIssues = diagnoses.filter((d) => ["warn", "bad"].includes(d.tone));
@@ -448,6 +591,7 @@ function renderNav() {
   setBadge("nav-compat", compatIssues, "warn");
   const svc = Object.values(state.snapshot?.supervisor?.services ?? {}).filter((s) => s.state !== "healthy").length;
   setBadge("nav-health", svc, "warn");
+  setBadge("nav-setup", setupPending(state.setup), state.setup?.errors?.length ? "bad" : "warn");
   $("router-dot").className = "dot " + (state.queueError ? "bad" : state.rows ? "ok" : "");
   $("router-label").textContent = state.queueError ? "路由离线" : "路由在线";
   $("router-meta").textContent = state.queueError ? "无法读取消息队列" : c.all + " 条消息 · 本机";
@@ -474,6 +618,7 @@ function render() {
   renderMessages();
   renderCompat();
   renderHealth();
+  renderSetup();
   renderAbout();
   hydrate();
 }
@@ -487,6 +632,7 @@ function page(name, options = {}) {
   $("page-sub").textContent = PAGES[name][1];
   render();
   document.querySelector("main").scrollTo(0, 0);
+  if (name === "setup" && !state.setupLoading) void loadSetup();
 }
 
 /* ---------- Message detail drawer ---------- */
@@ -683,10 +829,11 @@ async function desktops() {
     render();
   }
 }
-$("refresh").onclick = () => { queue(); desktops(); };
+$("refresh").onclick = () => { queue(); desktops(); if (state.page === "setup") loadSetup(); };
 page("overview");
 queue();
 desktops();
+void loadSetup();
 setInterval(queue, 3000);
 setInterval(() => { if (!document.hidden && !locked()) desktops(); }, 60000);
 setInterval(() => { if (!document.hidden) renderNav(); }, 30000);
