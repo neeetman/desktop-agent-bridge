@@ -89,6 +89,56 @@ async function queueWithReviews() {
       return queue;
 }
 
+// Read-only operator context for the console: native monitor files, supervisor
+// service state, the latest health sample per app and the certification report
+// behind each selected profile. Every source is optional.
+async function optionalJson(file) {
+  return read(file).catch(() => null);
+}
+function monitorRow(value) {
+  if (!value) return null;
+  const rows = Array.isArray(value.processes) && value.processes.length ? value.processes : [value];
+  const row = rows.find(item => item?.state && item.state !== "installed") ?? rows[0];
+  return row ? {state: row.state ?? null, code: row.code ?? null, error: row.error ?? row.detail ?? null,
+    time: typeof row.time === "number" ? new Date(row.time * 1000).toISOString() : null} : null;
+}
+// The router persists the latest probe result per app. Probes run only when a
+// session calls bridge_health, so the console shows the sample's age and never
+// starts a probe itself. Only health fields leave this function.
+async function latestHealth() {
+  const saved = (await optionalJson("runtime/router/state.json"))?.health ?? {};
+  return Object.fromEntries(Object.entries(saved).filter(([, row]) => row && typeof row === "object").map(([app, row]) => [app, {
+    status: row.status, ok: row.ok, checkedAt: row.checkedAt, elapsedMs: row.elapsedMs,
+    failedStep: row.failedStep, errorCode: row.errorCode, error: row.error, repair: row.repair,
+    consecutiveFailures: row.consecutiveFailures, lastSuccessAt: row.lastSuccessAt,
+    steps: (row.steps ?? []).map(({step, elapsedMs, timeoutMs, ok, errorCode}) => ({step, elapsedMs, timeoutMs, ok, errorCode})),
+  }]));
+}
+async function certification(profileId) {
+  const run = /-caps-([0-9a-f]{8})$/.exec(profileId ?? "")?.[1];
+  if (!run) return null;
+  const directory = path.join(root, "runtime/router/canary");
+  const folder = (await fs.readdir(directory).catch(() => [])).find(name => name.startsWith(run));
+  const report = folder && await optionalJson(path.join("runtime/router/canary", folder, "report.json"));
+  if (!report) return null;
+  const app = profileId.split("-")[0];
+  const checks = Object.fromEntries(Object.entries(report[app]?.checks ?? {}).map(([name, check]) =>
+    [name, {status: check.status, reason: check.reason ?? null}]));
+  return {runId: report.runId, stage: report.stage, checks};
+}
+async function supervisorStatus() {
+  const status = await local("runtime/supervisor/connection.json", "/status").catch(() => null);
+  if (!status) return null;
+  return {
+    startedAt: status.startedAt, lastTickAt: status.lastTickAt, paused: status.paused, recoveries: status.recoveries,
+    services: Object.fromEntries(Object.entries(status.services ?? {}).map(([name, row]) =>
+      [name, {pid: row.pid, state: row.state, restarts: row.restarts, failures: row.failures, lastError: row.lastError}])),
+    apps: Object.fromEntries(Object.entries(status.apps ?? {}).map(([name, row]) =>
+      [name, {pid: row.pid, state: row.state, updatePending: row.updatePending, closedByUser: row.closedByUser}])),
+  };
+}
+let lastSnapshot = null;
+
 function checkedApp(v) {
   if (!["codex", "claude"].includes(v)) throw Error("Invalid desktop");
   return v;
@@ -259,13 +309,24 @@ if (!app.requestSingleInstanceLock()) {
     bind("queue",queueWithReviews);
     bind("maintenance", () => updating && {...updating});
     bind("desktops", async () => {
-      const [result, deepseek, profiles] = await Promise.all([
+      const [result, deepseek, profiles, supervisor, health, codexMonitor, claudeMonitor] = await Promise.all([
         cli("doctor"),
         local("runtime/deepseek/connection.json", "/health").catch(() => null),
         cli("compat", "list"),
+        supervisorStatus(),
+        latestHealth(),
+        optionalJson("runtime/codex-mcp/monitor-status.json"),
+        optionalJson("runtime/claude-attach/status.json"),
       ]);
-      return {
+      const certifications = Object.fromEntries(await Promise.all(Object.entries(result.apps)
+        .map(async ([name, row]) => [name, await certification(row.profileId)])));
+      lastSnapshot = {
         apps: result.apps,
+        monitors: {codex: monitorRow(codexMonitor), claude: monitorRow(claudeMonitor)},
+        certifications,
+        supervisor,
+        health,
+        checkedAt: new Date().toISOString(),
         unverifiedWorkerApps: result.workers.filter(worker => worker.alive === null).map(worker => worker.app),
         workers: result.workers.filter(worker => worker.alive === true).map(worker => ({
           app:worker.app, pid:worker.pid, threadId:worker.threadId, revision:worker.clientRevision
@@ -276,8 +337,16 @@ if (!app.requestSingleInstanceLock()) {
         deepseek: !!deepseek?.ok,
         profiles: profiles.profiles
           .filter((p) => !p.revoked)
-          .map((p) => ({ id: p.id, app: p.app })),
+          .map((p) => ({ id: p.id, app: p.app, version: p.version, capabilities: p.capabilities })),
       };
+      return lastSnapshot;
+    });
+    bind("theme", value => {
+      if (value !== undefined) {
+        if (!["system", "light", "dark"].includes(value)) throw Error("Invalid theme");
+        nativeTheme.themeSource = value;
+      }
+      return {source: nativeTheme.themeSource, dark: nativeTheme.shouldUseDarkColors};
     });
     bind("update", (action, desktop, id) => {
       if (id && (typeof id !== "string" || !/^[a-z0-9._-]{1,96}$/.test(id)))
@@ -337,7 +406,7 @@ if (!app.requestSingleInstanceLock()) {
       icon: path.join(__dirname, "bridge.ico"),
       minWidth: 820,
       minHeight: 600,
-      backgroundColor: nativeTheme.shouldUseDarkColors ? "#191d2b" : "#f4f5fa",
+      backgroundColor: nativeTheme.shouldUseDarkColors ? "#14161c" : "#f6f7f9",
       autoHideMenuBar: true,
       show: false,
       webPreferences: {
@@ -350,7 +419,11 @@ if (!app.requestSingleInstanceLock()) {
     const notifySize = () => window.webContents.send("bridge:maximized", window.isMaximized());
     trayControl=require("./tray.cjs").installTray(window,async()=>{
       const {messages}=await queueWithReviews();
-      return {label:"路由在线",pending:messages.filter(m=>["queued","waiting_for_adapter","waiting_for_contract","waiting_for_connection","dispatching","awaiting_ack"].includes(m.stage)).length,
+      const apps=Object.entries(lastSnapshot?.apps??{}).map(([app,row])=>({app,phase:row.phase,
+        monitor:lastSnapshot.monitors?.[app]?.state??null,health:lastSnapshot.health?.[app]?.status??null,
+        healthAt:lastSnapshot.health?.[app]?.checkedAt??null,bridgeService:row.contract?!!row.service?.ok:undefined}));
+      if(lastSnapshot)apps.push({app:"deepseek",service:lastSnapshot.deepseek===true,desktop:!!lastSnapshot.supervisor?.apps?.deepseek?.pid});
+      return {label:"路由在线",apps,pending:messages.filter(m=>["queued","waiting_for_adapter","waiting_for_contract","waiting_for_connection","dispatching","awaiting_ack"].includes(m.stage)).length,
         read:messages.filter(m=>["acknowledged","replied"].includes(m.stage)).length,
         issues:messages.filter(m=>["unknown","failed","interrupted"].includes(m.stage)&&!m.review).length};
     });

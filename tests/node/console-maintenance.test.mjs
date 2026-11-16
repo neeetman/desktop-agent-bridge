@@ -53,16 +53,17 @@ test('failed and successful console operations release maintenance for the next 
 test('background maintenance is visible and disables conflicting console controls until completion',async()=>{
   const elements=new Map();
   const element=id=>{
-    if(!elements.has(id))elements.set(id,{value:'',textContent:'',innerHTML:'',hidden:false,
-      classList:{toggle(){}},setAttribute(){},addEventListener(){},querySelectorAll:()=>[],
+    if(!elements.has(id))elements.set(id,{value:'',textContent:'',innerHTML:'',hidden:false,dataset:{},
+      classList:{toggle(){},add(){},remove(){}},style:{setProperty(){}},setAttribute(){},addEventListener(){},
+      scrollTo(){},scrollIntoView(){},querySelectorAll:()=>[],
       querySelector:selector=>element(id+selector)});
     return elements.get(id);
   };
   let operation={label:'自动验收未知构建（最长约 17 分钟）',startedAt:new Date().toISOString()};
-  const context={document:{hidden:false,getElementById:element,querySelector:element,querySelectorAll:()=>[]},
-    setInterval(){},window:{scrollTo(){},bridge:{
-      loginStartup:async()=>false,onMaximized(){},windowAction:async()=>false,
-      queue:async()=>({messages:[]}),desktops:async()=>({apps:{},profiles:[]}),
+  const context={document:{hidden:false,getElementById:element,querySelector:element,querySelectorAll:()=>[],addEventListener(){}},
+    setInterval(){},setTimeout(){},clearTimeout(){},window:{scrollTo(){},bridge:{
+      loginStartup:async()=>false,onMaximized(){},windowAction:async()=>false,theme:async()=>({}),
+      queue:async()=>({messages:[]}),desktops:async()=>({apps:{codex:{phase:'attached',profileId:'codex-test',capabilities:['read']}},profiles:[]}),
       canaryWatch:async()=>({enabled:true,attempts:{}}),maintenance:async()=>operation,
     }}};
   vm.runInNewContext(fs.readFileSync(new URL('renderer.js',consoleRoot),'utf8')+
