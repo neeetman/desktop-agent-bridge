@@ -2,7 +2,7 @@
 
 Open **适配管理 → 未知版本 · 生成与验收** in the console and select the package to import. Both Windows desktops must be running with desktop-bridge MCP installed. The validator creates its own test chats in run-specific workspaces and records their IDs in the report.
 
-New Codex validation chats explicitly use `gpt-6-luna` with `low` reasoning effort. Native model readback must match before the fixture is accepted; validation does not fall back to the desktop's default model. The report records this selection with the fixture.
+Validation chats use the cheapest suitable models: Codex chats use `gpt-6.1-terra` with `low` reasoning effort, and Claude chats use `claude-haiku-5-5`. Native model readback must match before the fixture is accepted; validation does not fall back to the desktop's default model or borrow the model of another open chat. The report records this selection with the fixture.
 
 Import validates and stores a package. **已匹配** means the package matches the running build; use **空闲时激活** to attach and verify readiness. Import alone does not attach a helper. While maintenance or automatic validation is running, the console displays the operation and its start time and disables conflicting actions.
 

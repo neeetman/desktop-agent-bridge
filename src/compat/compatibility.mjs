@@ -128,7 +128,10 @@ export class Compatibility {
     }
     hashes??=old.generation===generation&&old.fileStamp===stamp?old.runningBuild.hashes:Object.fromEntries(Object.entries(files).map(([key,file])=>[key,digest(fs.readFileSync(file))]));
     const matches=this.profiles().filter(row=>row.profile.app===app&&Object.entries(hashes).every(([key,value])=>row.profile.hashes[key]===value));
-    let chosen=matches.find(row=>row.profile.id===(requestedId??(old.generation===generation?old.profileId:undefined)))??(!requestedId?matches.find(row=>!row.profile.revoked):undefined);
+    // A new process takes the most capable validated match, so a re-certified
+    // profile (for example one that added mcp) wins over an older import.
+    const preferred=matches.filter(row=>!row.profile.revoked).map((row,index)=>({row,index})).sort((a,b)=>b.row.profile.capabilities.length-a.row.profile.capabilities.length||b.index-a.index)[0]?.row;
+    let chosen=matches.find(row=>row.profile.id===(requestedId??(old.generation===generation?old.profileId:undefined)))??(!requestedId?preferred:undefined);
     if(!chosen)throw compatError('BUILD_UNSUPPORTED',`No validated ${app} profile matches the running desktop bytes`,{runningBuild:{...processInfo,hashes},fileStamp:stamp,generation});
     const {profile,adapterRoot}=chosen;if(profile.revoked)throw compatError('PROFILE_REVOKED','Selected compatibility profile was revoked');
     if(adapterDigest(adapterRoot,profile.adapterFiles)!==profile.adapterDigest)throw compatError('ADAPTER_STALE','Adapter bytes no longer match the validated profile');
