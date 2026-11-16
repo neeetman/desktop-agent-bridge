@@ -11,41 +11,37 @@
     <link rel="stylesheet" href="console.css" />
   </head>
   <body>
-    <aside>
+    <aside class="sidebar">
       <div class="brand">
         <svg viewBox="0 0 40 40" aria-hidden="true">
-          <rect width="40" height="40" rx="12" fill="#83ecdb" />
-          <path
-            d="M10 28V14h10a5 5 0 0 0 5-5M16 30v-9h10a4 4 0 0 0 4-4"
-            stroke="#173c50"
-            stroke-width="3.4"
-            fill="none"
-            stroke-linecap="round"
-          />
+          <rect width="40" height="40" rx="11" class="brand-tile" />
+          <path d="M10 28V14h10a5 5 0 0 0 5-5M16 30v-9h10a4 4 0 0 0 4-4" class="brand-mark" />
         </svg>
-        <div><b>Bridge</b><small>DESKTOP CONSOLE</small></div>
+        <div><b>Agent Bridge</b><small>本机控制台</small></div>
       </div>
-      <div class="nav-label">工作空间</div>
-      <nav>
-        <button data-page="home" class="nav active">
-          <i data-icon="overview"></i>通信总览
-        </button>
-        <button data-page="queue" class="nav">
-          <i data-icon="messages"></i>消息队列
-        </button>
-        <button data-page="adapters" class="nav">
-          <i data-icon="sliders"></i>适配管理
-        </button>
+      <nav aria-label="页面">
+        <button class="nav" data-page="overview"><i data-icon="overview"></i><span>总览</span><em id="nav-overview"></em></button>
+        <button class="nav" data-page="messages"><i data-icon="messages"></i><span>消息</span><em id="nav-messages"></em></button>
+        <button class="nav" data-page="compat"><i data-icon="layers"></i><span>适配</span><em id="nav-compat"></em></button>
+        <button class="nav" data-page="health"><i data-icon="pulse"></i><span>健康</span><em id="nav-health"></em></button>
+        <div class="nav-gap"></div>
+        <button class="nav" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
       </nav>
       <div class="sidebar-foot">
-        <span class="machine"><i data-icon="monitor"></i></span>
-        <div>本机工作区<small>Windows · Local</small></div>
+        <span class="dot" id="router-dot"></span>
+        <div><b id="router-label">正在连接路由</b><small id="router-meta">Windows · 本机</small></div>
       </div>
     </aside>
-    <main>
-      <header>
-        <span id="crumb">工作空间　/　通信总览</span>
-        <span class="live" id="network">正在连接</span>
+    <div class="shell">
+      <header class="topbar">
+        <div class="title">
+          <h1 id="page-title">总览</h1>
+          <span id="page-sub"></span>
+        </div>
+        <div class="top-actions">
+          <span class="checked" id="checked-at"></span>
+          <button class="icon-button" id="refresh" title="刷新" aria-label="刷新"><i data-icon="refresh"></i></button>
+        </div>
         <div class="caption-controls" role="group" aria-label="窗口控制">
           <button data-window="minimize" aria-label="最小化" title="最小化">
             <svg viewBox="0 0 16 16"><path d="M3 9h10"/></svg>
@@ -58,127 +54,122 @@
           </button>
         </div>
       </header>
-      <section class="content">
-        <div class="title-line">
-          <div>
-            <div class="eyebrow" id="eyebrow">OVERVIEW</div>
-            <h1 id="heading">通信总览</h1>
+      <main>
+        <div id="alert" class="banner bad" role="status" hidden></div>
+        <p id="maintenance-status" class="banner warn" role="status" hidden></p>
+        <div id="toast" class="toast" role="status" hidden></div>
+
+        <section data-view="overview">
+          <div id="summary" class="summary"></div>
+          <div class="section-head">
+            <h2>应用</h2>
+            <span class="hint">每个应用按顺序检查，进度条显示停在哪一步</span>
           </div>
-          <button class="quiet" id="refresh">
-            <i data-icon="refresh"></i>刷新
-          </button>
-        </div>
-        <div id="alert" role="status" hidden></div>
-        <section id="overview">
-          <div class="topology">
-            <div class="topo-info">
-              <small>CONNECTION MAP</small>
-              <h2>桌面连接</h2>
-              <p>本机路由与桌面端的连接状态</p>
-              <div class="router">
-                <span class="dot"></span><b>Peer Router</b
-                ><span id="router-state">连接中</span>
-              </div>
-            </div>
-            <div class="wiring">
-              <svg
-                viewBox="0 0 120 156"
-                preserveAspectRatio="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M1 78 H35 Q51 78 57 60 L64 40 Q69 24 86 24 H119 M1 78 H119 M1 78 H35 Q51 78 57 96 L64 116 Q69 132 86 132 H119"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.7"
-                />
-                <circle cx="5" cy="78" r="4" fill="#88e6d9" />
-              </svg>
-            </div>
-            <div class="endpoints" id="endpoints"></div>
+          <div id="app-grid" class="app-grid"></div>
+          <div class="columns">
+            <section class="panel">
+              <div class="panel-head"><h2>需要处理</h2></div>
+              <ul id="attention" class="attention"></ul>
+            </section>
+            <section class="panel">
+              <div class="panel-head"><h2>最近消息</h2><button class="link" data-goto="messages">全部消息 →</button></div>
+              <div id="recent"></div>
+            </section>
           </div>
         </section>
-        <div id="messages">
-          <div class="stats" id="stats"></div>
-          <div class="section-line">
-            <div>
-              <div class="eyebrow">MESSAGE STREAM</div>
-              <h2 id="table-heading">最近消息</h2>
-            </div>
-            <button class="text-action" id="see-all">全部消息　→</button>
+
+        <section data-view="messages" hidden>
+          <div class="toolbar">
+            <label class="search"><i data-icon="search"></i><input id="search" placeholder="搜索消息 ID、会话或应用" aria-label="搜索消息" /></label>
+            <div class="segmented" id="filters" role="tablist" aria-label="按状态筛选"></div>
           </div>
-          <div class="table-shell">
-            <div class="tools">
-              <label class="search"
-                ><i data-icon="search"></i
-                ><input
-                  id="search"
-                  placeholder="搜索消息 ID、会话或应用"
-                  aria-label="搜索消息" /></label
-              ><select id="filter" aria-label="筛选投递状态">
-                <option value="">所有状态</option>
-                <option value="pending">待处理</option>
-                <option value="delivered">已投递</option>
-                <option value="read">已确认 / 已回复</option>
-                <option value="issue">需检查</option>
-                <option value="reviewed">已复核</option>
-              </select>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>消息</th>
-                  <th>传送方向</th>
-                  <th>回执</th>
-                  <th>入队时间</th>
-                  <th></th>
-                </tr>
-              </thead>
+          <div class="panel flush">
+            <table class="table">
+              <thead><tr><th>消息</th><th>路径</th><th>状态</th><th>入队时间</th><th></th></tr></thead>
               <tbody id="rows"></tbody>
             </table>
             <div class="pager">
               <span id="range"></span>
-              <div>
-                <button id="prev" aria-label="上一页">‹</button
-                ><button id="next" aria-label="下一页">›</button>
-              </div>
+              <div><button id="prev" class="icon-button" aria-label="上一页">‹</button><button id="next" class="icon-button" aria-label="下一页">›</button></div>
             </div>
           </div>
-        </div>
-        <section id="adapters" hidden>
-          <div class="section-line"><div><h2>桌面适配包</h2><p class="section-note">按运行中的桌面构建匹配适配包。未知构建需先通过接口验证。</p></div></div>
-          <p class="result" id="maintenance-status" role="status" hidden></p>
-          <div id="packages"></div>
-          <div class="result" id="result" role="status" hidden></div>
-            <details class="canary-panel"><summary>未知版本 · 生成与验收</summary>
-              <p>在隔离目录自动创建两端的测试会话，验证消息回执、权限和 MCP 重载。会话 ID 记录在报告里，适配包只启用通过的能力。</p>
-              <form id="certify-form">
-                <label>生成适配包<select id="certify-app"><option value="codex">Codex</option><option value="claude">Claude</option></select></label>
-                <button class="primary">开始验收</button>
-              </form><p id="certify-result" role="status"></p>
-              <label class="preference-row" for="canary-watch"><span class="preference-copy"><strong>检测到未知构建时自动验收</strong><small>控制台运行期间生效，每组指纹只尝试一次</small></span>
-                <input class="switch" id="canary-watch" type="checkbox" role="switch"></label>
-              <p id="canary-watch-status" role="status"></p>
-            </details>
-          <section class="preferences" aria-labelledby="preferences-heading">
-            <h2 id="preferences-heading">启动偏好</h2>
-            <div class="preference-row"><span class="preference-copy"><strong>关闭窗口后在后台运行</strong><small>左键点击系统托盘图标重新打开，右键选择“退出控制台”完全退出</small></span></div>
-            <label class="preference-row" for="login-startup">
-              <span class="setting-icon"><i data-icon="monitor"></i></span>
-              <span class="preference-copy"><strong>登录时打开控制台</strong>
-                <small>进入 Windows 后显示本机工作区</small></span>
-              <small id="startup-note" role="status"></small>
-              <input class="switch" id="login-startup" type="checkbox" role="switch" aria-label="登录 Windows 后打开控制台" disabled />
+        </section>
+
+        <section data-view="compat" hidden>
+          <div id="packages" class="stack"></div>
+          <section class="panel" id="certify-panel">
+            <div class="panel-head">
+              <div><h2>未知版本 · 生成与验收</h2>
+                <p class="muted">在隔离目录自动创建 Codex 和 Claude 测试会话，验证消息回执、权限和 MCP 重载。适配包只启用通过的能力，会话 ID 记录在报告里。</p></div>
+            </div>
+            <form id="certify-form" class="inline-form">
+              <label>目标应用<select id="certify-app"></select></label>
+              <button class="primary">开始验收</button>
+              <span id="certify-result" class="muted" role="status"></span>
+            </form>
+            <ul class="checklist">
+              <li>MCP 重载是全局操作：所有已加载会话都需空闲，且不能有受保护会话，否则 MCP 检查会被推迟。</li>
+              <li>验收期间不要更新桌面，否则结果作废。</li>
+            </ul>
+            <label class="row-setting" for="canary-watch">
+              <span><strong>检测到未知构建时自动验收</strong><small>控制台运行期间每分钟检查一次，每组构建指纹只尝试一次</small></span>
+              <input class="switch" id="canary-watch" type="checkbox" role="switch" />
             </label>
+            <p id="canary-watch-status" class="muted small" role="status"></p>
+          </section>
+          <section class="panel flush">
+            <div class="panel-head padded"><h2>已安装适配包</h2><span class="muted" id="profile-count"></span></div>
+            <table class="table compact">
+              <thead><tr><th>适配包</th><th>应用</th><th>版本</th><th>能力</th></tr></thead>
+              <tbody id="profiles"></tbody>
+            </table>
           </section>
         </section>
-      </section>
-    </main>
-    <dialog id="detail">
-      <div class="detail-head">
-        <div class="eyebrow">DELIVERY RECEIPT</div>
-        <button id="close" aria-label="关闭">×</button>
-      </div>
+
+        <section data-view="health" hidden>
+          <div id="supervisor" class="summary"></div>
+          <div class="section-head"><h2>健康探测</h2><span class="hint">每个应用独立探测：服务 HTTP 检查后做一次只读原生会话查询。连续三次失败且超过 60 秒才确认故障。</span></div>
+          <div id="probes" class="app-grid"></div>
+          <div class="section-head"><h2>后台服务</h2><span class="hint">由监督器管理，异常时自动恢复</span></div>
+          <section class="panel flush">
+            <table class="table compact">
+              <thead><tr><th>服务</th><th>状态</th><th>PID</th><th>重启</th><th>最近错误</th></tr></thead>
+              <tbody id="services"></tbody>
+            </table>
+          </section>
+        </section>
+
+        <section data-view="settings" hidden>
+          <section class="panel">
+            <div class="panel-head"><h2>外观</h2></div>
+            <div class="row-setting">
+              <span><strong>主题</strong><small>托盘预览随之切换</small></span>
+              <div class="segmented" id="theme" role="radiogroup" aria-label="主题">
+                <button data-theme="system" role="radio">跟随系统</button>
+                <button data-theme="light" role="radio">浅色</button>
+                <button data-theme="dark" role="radio">深色</button>
+              </div>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>启动与后台</h2></div>
+            <label class="row-setting" for="login-startup">
+              <span><strong>登录 Windows 时打开控制台</strong><small id="startup-note">进入 Windows 后显示本机工作区</small></span>
+              <input class="switch" id="login-startup" type="checkbox" role="switch" disabled />
+            </label>
+            <div class="row-setting">
+              <span><strong>关闭窗口后在后台运行</strong><small>左键点击托盘图标重新打开，右键查看状态或退出控制台。桥接服务和看门狗由计划任务管理，与控制台无关。</small></span>
+            </div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><h2>关于</h2></div>
+            <dl class="facts" id="about"></dl>
+          </section>
+        </section>
+      </main>
+    </div>
+    <dialog id="detail" class="drawer">
+      <div class="drawer-head"><h2>投递详情</h2><button id="close" class="icon-button" aria-label="关闭">×</button></div>
       <div id="detail-body"></div>
     </dialog>
     <script src="renderer.js"></script>

@@ -9,7 +9,7 @@ const {
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-function previewBounds(area, point, width = 320, height = 190) {
+function previewBounds(area, point, width = 340, height = 262) {
   return {
     x: Math.max(area.x, Math.min(point.x - width, area.x + area.width - width)),
     y: Math.max(
@@ -36,16 +36,16 @@ function installTray(main, loadStatus) {
   async function showPreview() {
     if (!preview) {
       preview = new BrowserWindow({
-        width: 320,
-        height: 190,
+        width: 340,
+        height: 262,
         frame: false,
         resizable: false,
         skipTaskbar: true,
         alwaysOnTop: true,
         show: false,
         backgroundColor: nativeTheme.shouldUseDarkColors
-          ? "#222738"
-          : "#f7f8fc",
+          ? "#1c1f27"
+          : "#ffffff",
         webPreferences: {
           preload: path.join(__dirname, "tray-preload.cjs"),
           sandbox: true,
