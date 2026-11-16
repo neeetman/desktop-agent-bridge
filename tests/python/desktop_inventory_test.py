@@ -38,6 +38,21 @@ class DesktopInventoryTests(unittest.TestCase):
             # the existing generation stable rather than replacing its helper.
             self.assertEqual(desktop_rows([lower]), desktop_rows([rows[0]]))
 
+    def test_orphaned_helper_of_an_exited_desktop_is_not_a_second_desktop(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'desktop/resources').mkdir(parents=True)
+            (root / 'desktop/resources/app.asar').touch()
+            executable = str(root / 'desktop/Claude.exe')
+            main = {'Name': 'Claude.exe', 'ProcessId': 20, 'ParentProcessId': 1, 'ExecutablePath': executable,
+                    'Created': 'new', 'CommandLine': '"' + executable + '" '}
+            # Crash reporter of a previous instance whose main process (PID 5) exited.
+            orphan = dict(main, ProcessId=21, ParentProcessId=5, Created='old',
+                          CommandLine='"' + executable + '" --type=crashpad-handler --monitor-self')
+            self.assertEqual([row['pid'] for row in desktop_rows([main, orphan])], [20])
+            # An unreadable command line keeps the parent-based check and its ambiguity.
+            self.assertEqual(len(desktop_rows([main, dict(orphan, CommandLine=None)])), 2)
+
     @unittest.skipUnless(os.name == 'nt', 'Win32 integration')
     def test_live_win32_snapshot_is_read_only_and_has_exact_process_identity(self):
         rows = process_rows()
