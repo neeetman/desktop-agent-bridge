@@ -117,3 +117,42 @@ test('a new process selects the most capable validated profile, not the first im
   // A revoked capable profile is never preferred.
   f.update({revoked:true});const fallback=await f.manager.doctor('codex');assert.equal(fallback.apps.codex.profileId,'test-v0');
 }finally{f.close();}});
+
+test('an unchanged selection resolves without the cross-process lock or a state write; any change takes the locked path',async()=>{const f=fixture();try{
+  let locks=0;const locked=f.manager.locked.bind(f.manager);f.manager.locked=fn=>{locks++;return locked(fn);};
+  const stateFile=path.join(f.root,'runtime/updates/state.json');
+  const first=await f.manager.resolve('codex','read');assert.equal(locks,1);
+  const written=fs.statSync(stateFile).mtimeMs;
+  const second=await f.manager.resolve('codex','send');assert.equal(locks,1);
+  assert.deepEqual(second.binding,first.binding);assert.equal(second.profile.id,first.profile.id);assert.equal(second.adapterRoot,first.adapterRoot);
+  assert.equal(fs.statSync(stateFile).mtimeMs,written);
+  // A lease on an unchanged selection is a file of its own: no lock, no state write.
+  const leaseDir=path.join(f.root,'runtime/updates/leases');
+  const leased=await f.manager.resolve('codex','read',{lease:true});assert.equal(locks,1);
+  assert.ok(fs.existsSync(path.join(leaseDir,leased.leaseId+'.json')));assert.equal(fs.statSync(stateFile).mtimeMs,written);
+  await f.manager.release(leased.leaseId);assert.ok(!fs.existsSync(path.join(leaseDir,leased.leaseId+'.json')));assert.equal(locks,1);
+  // An activation records its transition, then finds the live lease and defers without probing.
+  const held=await f.manager.resolve('codex','read',{lease:true});let probes=0;
+  await assert.rejects(f.manager.activate('codex','test-v1',{idleProbe:async()=>{probes++;return {authoritative:true,idle:true};},attachProbe:async()=>({ready:true})}),{code:'REFRESH_DEFERRED_BUSY'});
+  assert.equal(probes,0);assert.equal(f.manager.state().apps.codex.transition.phase,'waitingIdle');
+  // While that transition waits, a new lease takes the locked path and is refused.
+  await assert.rejects(f.manager.resolve('codex','read',{lease:true}),{code:'REFRESH_DEFERRED_BUSY'});
+  await f.manager.release(held.leaseId);await f.manager.recover('codex');
+  const afterRecover=await f.manager.resolve('codex','read',{lease:true});await f.manager.release(afterRecover.leaseId);
+  // Expired leases and leases of dead processes are swept and never block.
+  fs.writeFileSync(path.join(leaseDir,crypto.randomUUID()+'.json'),JSON.stringify({app:'codex',pid:999999,createdAt:0,expiresAt:0}));
+  assert.deepEqual(f.manager.liveLeaseFiles('codex'),[]);assert.deepEqual(fs.readdirSync(leaseDir),[]);
+  locks=0;
+  // An unvalidated capability is reported by the locked path.
+  await assert.rejects(f.manager.resolve('codex','create'),{code:'CAPABILITY_UNSUPPORTED'});assert.equal(locks,1);
+  // New credentials change the binding epoch: locked path, new binding.
+  atomicJson(sourcePath(f.root,'runtime/connection.json'),{token:'rotated-secret'});
+  const rotated=await f.manager.resolve('codex','read');assert.equal(locks,2);assert.notEqual(rotated.binding.credentialEpoch,first.binding.credentialEpoch);
+  await f.manager.resolve('codex','read');assert.equal(locks,2);
+  // A tripped circuit is enforced by the locked path.
+  await f.manager.trip('codex','send',rotated.binding);
+  await assert.rejects(f.manager.resolve('codex','send'),{code:'CONTRACT_MISMATCH'});
+  // A new desktop process generation is a change.
+  f.inventory().processes[0].createdAt='restarted';const moved=await f.manager.resolve('codex','read');
+  assert.notEqual(moved.binding.generation,rotated.binding.generation);
+}finally{f.close();}});
