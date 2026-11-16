@@ -7,6 +7,7 @@ import {codexMcp} from '../adapters/codex/codex-mcp-control.mjs';
 import {lifecycle} from '../adapters/claude/claude-lifecycle.mjs';
 import fs from 'node:fs';
 import {setupCaller,removeCaller,listCallers,createTaskAsScript} from '../mcp/script-callers.mjs';
+import {antigravityDoctor} from '../adapters/antigravity/antigravity-native.mjs';
 const option=(args,name)=>args.includes(name)?args[args.indexOf(name)+1]:undefined;
 const options=(args,name)=>args.flatMap((arg,index)=>arg===name&&args[index+1]!==undefined?[args[index+1]]:[]);
 const required=(args,name)=>{const value=option(args,name);if(value===undefined||value.startsWith('--'))throw compatError('INVALID_ARGUMENT',`${name} is required`,{status:400});return value;};
@@ -35,7 +36,8 @@ export async function refreshClaudeMcp(thread,server='desktop-bridge',request=li
 export async function main(args){
  try{
   let result;const app=option(args,'--app');
-  if(app&&!['codex','claude'].includes(app))throw compatError('INVALID_ARGUMENT','--app must be codex or claude');
+  if(app&&!['codex','claude','antigravity'].includes(app))throw compatError('INVALID_ARGUMENT','--app must be codex, claude or antigravity');
+  if(app==='antigravity'&&args[0]!=='doctor')throw compatError('INVALID_ARGUMENT','Antigravity is gated by contract probes, not compatibility profiles; use doctor --app antigravity');
   if(args[0]==='console'){
    const {default:electron}=await import('electron').catch(()=>{throw Error('Install the optional Electron dependency to open the console.');});
    const env={...process.env, DESKTOP_BRIDGE_NODE:process.execPath};
@@ -44,8 +46,10 @@ export async function main(args){
    process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
    return;
   }else if(args[0]==='doctor'){
-   result=await coordinator.doctor(app);
-   if(args.includes('--probe')){
+   const agy=()=>antigravityDoctor(undefined,{connectionFile:sourcePath(ROOT,'runtime/antigravity/connection.json'),clientLog:sourcePath(ROOT,'runtime/router/mcp-clients.jsonl')});
+   if(app==='antigravity')result={apps:{antigravity:await agy()}};
+   else{result=await coordinator.doctor(app);if(!app)result.apps={...result.apps,antigravity:await agy()};}
+   if(args.includes('--probe')&&app!=='antigravity'){
     if(!app)throw compatError('INVALID_ARGUMENT','--probe requires --app');
     const kind=app==='claude'?'claude':result.apps.codex?.capabilities?.some(c=>['create','execution'].includes(c))?'execution':'messaging';
     const selected=await coordinator.resolve(app,kind==='execution'?'execution':'read');
@@ -81,7 +85,7 @@ export async function main(args){
   }else if(args[0]==='install'){
    if(process.platform!=='win32')throw compatError('UNSUPPORTED_PLATFORM','Desktop installation requires Windows');
    const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',sourcePath(ROOT,'install.ps1'),...args.slice(1)],{stdio:'inherit',windowsHide:true});process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',resolve);});return;
-  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude] [--probe]','compat list','compat discover --app <app>','compat certify --app <app> --codex-thread <uuid> --claude-thread <local_uuid>','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>','script-caller setup --name <name> --project <abs-path> [--project ...] --max-per-hour <n> --authorization <owner statement> [--rotate]','script-caller list','script-caller remove --name <name>','script create-task --caller <name> --title <title> --prompt-file <file> --idempotency-key <key> [--project <abs-path>] [--model <id>] [--effort <level>]']};
+  }else result={name:'@neeetman/desktop-agent-bridge',commands:['console','doctor [--app codex|claude|antigravity] [--probe]','compat list','compat discover --app <app>','compat certify --app <app> --codex-thread <uuid> --claude-thread <local_uuid>','compat import <local-directory>','compat plan --app <app> [--profile <id>]','compat activate --app <app> --profile <id> --when-idle','compat rollback --app <app>','compat recover --app <app>','install <PowerShell installer arguments>','script-caller setup --name <name> --project <abs-path> [--project ...] --max-per-hour <n> --authorization <owner statement> [--rotate]','script-caller list','script-caller remove --name <name>','script create-task --caller <name> --title <title> --prompt-file <file> --idempotency-key <key> [--project <abs-path>] [--model <id>] [--effort <level>]']};
   console.log(JSON.stringify(result,null,2));
  }catch(error){console.error(JSON.stringify({error:error.message,code:error.code??'BRIDGE_ERROR',dispatchNotStarted:error.dispatchNotStarted??false,...(error.status?{httpStatus:error.status}:{}),...(error.retryAfterSeconds?{retryAfterSeconds:error.retryAfterSeconds}:{})}));process.exitCode=1;}
 }

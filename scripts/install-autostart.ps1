@@ -1,4 +1,4 @@
-param([switch]$NoStart, [switch]$WithoutDeepSeek)
+param([switch]$NoStart, [switch]$WithoutDeepSeek, [switch]$WithoutAntigravity)
 . (Join-Path $PSScriptRoot 'bridge-paths.ps1')
 $ErrorActionPreference = 'Stop'
 $directory = Join-Path $ProjectRoot 'runtime/supervisor'
@@ -23,6 +23,9 @@ $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path ([Environ
 $config = [ordered]@{version=1;taskName=$taskName;watchdogTaskName=$watchdogName;userSid=$sid;node=$nodePath;python=$pythonPath;pythonw=$pythonwPath;powershell=$powershellPath;codexHome=$codexHome;callerThread=$connection.callerThread;apps=@{codex=@{executable=(Join-Path $codexPackage.InstallLocation 'app/ChatGPT.exe')};claude=@{executable=(Join-Path $claudePackage.InstallLocation 'app/Claude.exe')}}}
 $deepseekExecutable = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/DeepSeek Harness.exe'
 if (-not $WithoutDeepSeek -and (Test-Path -LiteralPath $deepseekExecutable)) { $config.apps.deepseek = @{executable=$deepseekExecutable} }
+# Antigravity runs only as a bridge service; the supervisor never launches its desktop.
+$antigravityServer = Join-Path $env:LOCALAPPDATA 'Programs/antigravity/resources/bin/language_server.exe'
+if (-not $WithoutAntigravity -and (Test-Path -LiteralPath $antigravityServer)) { $config.services = @{antigravity=@{enabled=$true}} }
 $configPath = Join-Path $directory 'config.json'
 if (Test-Path -LiteralPath $configPath) { Copy-Item -LiteralPath $configPath -Destination (Join-Path $directory 'config.previous.json') -Force }
 $utf8 = New-Object System.Text.UTF8Encoding($false)

@@ -14,7 +14,7 @@ Closing the console sends it to the Windows notification area. Left-click its ic
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-An open-source, local session bridge for **Codex Desktop, Claude Code in Claude Desktop, and DeepSeek Harness on Windows**. Desktop agents can send messages, receive replies, request decisions, and wake the original session through MCP.
+An open-source, local session bridge for **Codex Desktop, Claude Code in Claude Desktop, DeepSeek Harness, and Antigravity 2.0 on Windows**. Desktop agents can send messages, receive replies, request decisions, and wake the original session through MCP.
 
 The project reuses native desktop sessions. It does not replace them with a separate Codex app-server. It depends on private desktop interfaces, so support is tied to verified application builds.
 
@@ -49,7 +49,7 @@ python -m pip install -r requirements.txt
 .\scripts\install.ps1 -CallerThread "<existing-codex-chat-id>" -WritableRoots "C:\Work"
 ```
 
-The installer merges one `desktop-bridge` MCP entry, backs up existing configuration, and registers per-user startup and recovery tasks. It preserves other MCP servers and local execution policies. Add `-WithDeepSeek` after initializing the DeepSeek Harness desktop profile. Add `-ProtectedThreads @("<important-chat-id>")` to protect critical chats.
+The installer merges one `desktop-bridge` MCP entry, backs up existing configuration, and registers per-user startup and recovery tasks. It preserves other MCP servers and local execution policies. Add `-WithDeepSeek` after initializing the DeepSeek Harness desktop profile. Add `-WithAntigravity` to install the Antigravity plugin and its bridge service (see [Antigravity](docs/antigravity.md)). Add `-ProtectedThreads @("<important-chat-id>")` to protect critical chats.
 
 `-WritableRoots` controls additional writable directories; it is optional. The initial execution default is `workspace-write` with `on-request` approval. Full access requires an explicit request.
 
@@ -111,6 +111,7 @@ desktop-agent-bridge script create-task --caller uecapture-ops-poller --title "<
 | Claude Desktop, Windows x64 | `4.29.0` | EXE and app.asar hashes |
 | Claude Desktop, Windows x64 | `4.4212.0` (Appx `4.4212.0.0`) | Verified session and worker identity contract |
 | DeepSeek Harness | `0.2.1-rc.3` | Native Cordis Host plugin contract |
+| Antigravity 2.0 | `44.9.1` (Language Server `2.32.1`) | Contract probes: `agentapi` subcommands, index columns, live hub `/healthz` |
 
 Frida is pinned to **17.9.1**. Unknown Codex/Claude bytes are rejected. Updating a version string or hash alone does not establish compatibility.
 
@@ -120,7 +121,7 @@ Frida is pinned to **17.9.1**. Unknown Codex/Claude bytes are rejected. Updating
 bin/                    Stable command-line entry point
 src/
   core/                 HTTP tasks, contracts, signals, execution policy
-  adapters/             Codex, Claude, and DeepSeek native integrations
+  adapters/             Codex, Claude, DeepSeek, and Antigravity native integrations
   mcp/                  MCP clients, tool catalog, message/decision router
   compat/               Build selection, helper identity, activation/recovery
   supervisor/           Windows service supervision and recovery policy

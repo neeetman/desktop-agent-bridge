@@ -83,10 +83,11 @@ const apps = {
   codex: "Codex",
   claude: "Claude",
   deepseek: "DeepSeek",
+  antigravity: "Antigravity",
   bridge: "Bridge",
 };
-const names = ["codex", "claude", "deepseek"];
-const symbols = { codex: "⌁", claude: "✳", deepseek: "≈" };
+const names = ["codex", "claude", "deepseek", "antigravity"];
+const symbols = { codex: "⌁", claude: "✳", deepseek: "≈", antigravity: "▲" };
 const state = {
   page: "home",
   rows: [],
@@ -158,6 +159,9 @@ function phase(name) {
       blocked: "等待适配",
       selected: "已匹配",
       notAttached: "待连接",
+      app_not_running: "未运行",
+      contract_mismatch: "契约不符",
+      not_installed: "未安装",
     }[row?.phase] ||
     row?.phase ||
     "待检查"
@@ -167,7 +171,7 @@ function phaseTone(name) {
   if (name === 'deepseek') return state.deepseek === true ? 'read' : state.deepseek === false ? 'issue' : 'neutral';
   const phase = state.apps[name]?.phase;
   if (phase === 'ready' || phase === 'attached') return 'read';
-  return phase === 'blocked' ? 'issue' : 'neutral';
+  return phase === 'blocked' || phase === 'contract_mismatch' ? 'issue' : 'neutral';
 }
 function version(row) {
   return (
@@ -196,7 +200,7 @@ function renderDesktops() {
         "<b>" +
         apps[n] +
         "</b><small>" +
-        esc(n === "deepseek" ? "Harness" : version(state.apps[n])) +
+        esc(n === "deepseek" ? "Harness" : n === "antigravity" ? "LS " + (state.apps.antigravity?.hub?.lsVersion || "—") : version(state.apps[n])) +
         '</small><span class="state ' + phaseTone(n) + '">' +
         esc(phase(n)) +
         "</span></div>",

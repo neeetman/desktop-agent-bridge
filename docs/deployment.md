@@ -36,6 +36,10 @@ Codex MCP 配置位于 `$env:CODEX_HOME/config.toml`，未指定时使用用户�
 
 先安装并初始化 Harness Desktop，然后给安装命令增加 `-WithDeepSeek`。插件安装器合并用户目录 `.dsh/profiles/desktop/cordis.patch.yml`，部署到本机 `runtime/deepseek-native/releases/<内容版本>`，保留其他模型与插件设置。首次安装后让 Harness Host 加载该 profile；已有活动会话时不要强制热重载。
 
+## Antigravity 2.0
+
+给安装命令增加 `-WithAntigravity`。插件安装器写入用户目录 `.gemini/config/plugins/desktop-agent-bridge/`（带托管标记，拒绝覆盖非托管或含未知文件的目录，旧版本备份到 `runtime/antigravity/plugin-backups/`），守护配置开启 43134 端口的 Antigravity 桥接服务。`-AntigravityIdentityHook` 额外安装 PreToolUse 兜底身份钩子，默认不装。Antigravity 只对新会话加载插件；守护不会启动、重启或关闭 Antigravity 桌面。用 `node bin/desktop-agent-bridge.mjs doctor --app antigravity` 检查契约、Hub 和服务。细节见 [Antigravity](antigravity.md)。
+
 ## 验收
 
 1. `npm run status`：各选用组件健康，原生附着没有 incompatible 状态。

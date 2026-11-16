@@ -359,6 +359,10 @@ h2 {
   background: #dae5ff;
   color: #3f61ae;
 }
+.antigravity {
+  background: #e3f0d6;
+  color: #3d6b1f;
+}
 .stats {
   margin: 16px 0 22px;
   display: grid;

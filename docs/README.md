@@ -9,6 +9,7 @@ The default project overview and contribution workflow are available in English.
 | [Contributing](../CONTRIBUTING.md) | English | Development, tests, compatibility evidence, releases |
 | [Architecture](architecture.md) | Chinese | Runtime components and HTTP/native boundaries |
 | [Peer MCP](peer-mcp.md) | Chinese | Messaging, receipts, decisions, permissions |
+| [Antigravity](antigravity.md) | English | Antigravity 2.0 adapter: hub, agentapi, transcripts, identity, contract probes |
 | [Health monitoring](health-monitoring.md) | English | Probe budgets, failure confirmation, and diagnosis |
 | [Deployment](deployment.md) | Chinese | Installation, validation, uninstallation |
 | [Autostart](autostart.md) | Chinese | Per-user startup, recovery, and supervision |

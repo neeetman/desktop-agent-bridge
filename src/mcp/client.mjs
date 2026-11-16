@@ -28,7 +28,7 @@ const executionProperties = { model: { type: 'string' }, effort: { type: 'string
 if (provider === 'deepseek') executionProperties.workspaceId = { type: 'string', description: 'Native DeepSeek Workspace ID; alias of projectId. Choose the workspace before creating a new session.' };
 const modelProperties = { model: executionProperties.model, effort: executionProperties.effort };
 if(provider==='codex')Object.assign(executionProperties,{writableRoots:{type:'array',items:{type:'string'}},sandboxMode:{type:'string',enum:['workspace-write','read-only','danger-full-access']},approvalPolicy:{type:'string',enum:['on-request','untrusted','never','on-failure']}});
-const listProperties = { limit: { type: 'integer', minimum: 1, maximum: 50 }, projectId: { type: 'string' }, hostId: { type: 'string' }, status: { type: 'string' }, q: { type: 'string' }, kind: { type: 'string', enum: ['codex', 'claude', 'deepseek', 'chatgpt', 'all'] } };
+const listProperties = { limit: { type: 'integer', minimum: 1, maximum: 50 }, projectId: { type: 'string' }, hostId: { type: 'string' }, status: { type: 'string' }, q: { type: 'string' }, kind: { type: 'string', enum: ['codex', 'claude', 'deepseek', 'antigravity', 'chatgpt', 'all'] } };
 const tools = [
   { name: 'bridge_send', description: 'Proactively send progress, findings or blockers from this Codex session to its external bridge. Does not message any other chat.', inputSchema: { type: 'object', properties: { text: { type: 'string' }, kind: { type: 'string', enum: ['message', 'progress', 'finding', 'blocker'] }, messageId: { type: 'string' }, replyTo: { type: 'string' }, threadId: { type: 'string' } }, required: ['text'], additionalProperties: false } },
   { name: 'bridge_decision', description: 'Ask the external task owner for a decision. Once accepted, finish the current turn and wait. The answer wakes this same chat; do not poll or guess the answer.', inputSchema: { type: 'object', properties: { question: { type: 'string' }, options: { type: 'array', items: { type: 'string' }, minItems: 2, maxItems: 10 }, recommendation: { type: 'string' }, context: { type: 'string' }, messageId: { type: 'string' }, threadId: { type: 'string' } }, required: ['question', 'options'], additionalProperties: false } },
@@ -90,7 +90,7 @@ if (argv.includes('--mcp')) {
       switch (message.method) {
         case 'initialize': result = { protocolVersion: message.params?.protocolVersion ?? '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: `${provider}-gui-bridge`, version: '0.8.4' } }; break;
         case 'ping': result = {}; break;
-        case 'tools/list': result = { tools: provider !== 'codex' ? tools.map(tool => ({ ...tool, name: tool.name.replace(/^codex_/, `${provider}_`), description: tool.description.replaceAll('Codex', provider === 'claude' ? 'Claude' : 'DeepSeek').replaceAll('codex_', `${provider}_`) })) : tools }; break;
+        case 'tools/list': result = { tools: provider !== 'codex' ? tools.map(tool => ({ ...tool, name: tool.name.replace(/^codex_/, `${provider}_`), description: tool.description.replaceAll('Codex', {claude:'Claude',deepseek:'DeepSeek',antigravity:'Antigravity'}[provider] ?? provider).replaceAll('codex_', `${provider}_`) })) : tools }; break;
         case 'tools/call': {
           try { result = { content: [{ type: 'text', text: JSON.stringify(await call(message.params.name, message.params.arguments)) }] }; }
           catch (error) { result = { isError: true, content: [{ type: 'text', text: JSON.stringify({error:errorData(error)}) }] }; }

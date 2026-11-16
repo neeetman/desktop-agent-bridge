@@ -24,7 +24,7 @@ export function crossApp(from, to) {
     throw Object.assign(bad(400, `Same-app bridge traffic is rejected (${from.app} to ${to.app}); use ${from.app}'s own session messaging instead`), { code: 'SAME_APP_FORBIDDEN' });
 }
 const text = (value, field) => { if (typeof value !== 'string' || !value.trim()) throw bad(400, `${field} is required`); return value; };
-const address = value => { if (!value || !['codex', 'claude', 'deepseek'].includes(value.app)) throw bad(400, 'Address requires app=codex|claude|deepseek'); text(value.threadId, 'threadId'); return { app: value.app, threadId: value.threadId }; };
+const address = value => { if (!value || !['codex', 'claude', 'deepseek', 'antigravity'].includes(value.app)) throw bad(400, 'Address requires app=codex|claude|deepseek|antigravity'); text(value.threadId, 'threadId'); return { app: value.app, threadId: value.threadId }; };
 const equal = (a, b) => a.app === b.app && a.threadId === b.threadId;
 const atomic = (file, value) => { const temporary = `${file}.tmp`; fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600, flush:true }); fs.renameSync(temporary, file); };
 
@@ -49,7 +49,7 @@ export class PeerRouter {
   }
   save() { atomic(this.stateFile, this.state); }
   async nativeRequest(app, route, method = 'GET', body, key, options = {}) {
-    const file = sourcePath(ROOT, { codex: 'runtime/connection.json', claude: 'runtime/claude/connection.json', deepseek: 'runtime/deepseek/connection.json' }[app] ?? 'invalid-app');
+    const file = sourcePath(ROOT, { codex: 'runtime/connection.json', claude: 'runtime/claude/connection.json', deepseek: 'runtime/deepseek/connection.json', antigravity: 'runtime/antigravity/connection.json' }[app] ?? 'invalid-app');
     const unavailable = () => {
       const adapter = ['codex','claude'].includes(app) ? coordinator.state().apps[app] : null;
       const code = adapter?.blockedReason ?? 'SERVICE_INITIALIZING';
@@ -173,7 +173,7 @@ export class PeerRouter {
       : ['unknown','failed','expired','interrupted'].includes(job.status) ? job.status
       : message.deliveredAt ? 'delivered' : job.status === 'queued' && job.blockedByUpdate
         ? job.blockedByUpdate === 'CONTRACT_MISMATCH' ? 'waiting_for_contract'
-          : ['SERVICE_INITIALIZING','CREDENTIALS_NOT_READY'].includes(job.blockedByUpdate) ? 'waiting_for_connection' : 'waiting_for_adapter'
+          : ['SERVICE_INITIALIZING','CREDENTIALS_NOT_READY','APP_NOT_RUNNING'].includes(job.blockedByUpdate) ? 'waiting_for_connection' : 'waiting_for_adapter'
         : job.status;
     return {id:message.id, callerId:message.callerId ?? null, kind:message.kind, from:message.from, to:message.to,
       stage, jobStatus:job.status, createdAt:message.createdAt, deliveredAt:message.deliveredAt ?? null,
@@ -405,7 +405,7 @@ export class PeerRouter {
     this.save();return {archivedMessageIds:rows.map(row=>row.id),consumptionUnchanged:true,receipt:this.receipt(who,null)};
   }
   async health(app){
-    const apps=app&&app!=='all'?[app]:['codex','claude','deepseek'];
+    const apps=app&&app!=='all'?[app]:['codex','claude','deepseek','antigravity'];
     return this.healthMonitor.check(apps);
   }
   healthRecipientEnabled(who,message){
@@ -480,13 +480,13 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         case '/v1/reply': return reply(202, await router.reply(data));
         case '/v1/ack': return reply(200,await router.acknowledge(data));
         case '/v1/health': {
-          if(data.app&&!['codex','claude','deepseek','all'].includes(data.app))throw bad(400,'Unknown app');
+          if(data.app&&!['codex','claude','deepseek','antigravity','all'].includes(data.app))throw bad(400,'Unknown app');
           if(data.subscribe!==undefined)await router.setHealthSubscription(data);
           return reply(200,await router.health(data.app));
         }
         case '/v1/create-task': {
           address(data.from);await router.validate(data.from);
-          if(!['codex','claude','deepseek'].includes(data.app))throw bad(400,'Unknown app');
+          if(!['codex','claude','deepseek','antigravity'].includes(data.app))throw bad(400,'Unknown app');
           crossApp(data.from,{app:data.app,threadId:'new'});
           if(data.input?.threadId)throw bad(400,'create-task creates a new chat; use bridge_send for an existing chat');
           text(data.idempotencyKey,'idempotencyKey');
@@ -510,15 +510,15 @@ export async function startRouter({ directory, port = 43130, backendRequest, hea
         case '/v1/outbox': return reply(200, router.outbox(data));
         case '/v1/queue': return reply(200,{messages:Object.values(router.state.messages).map(m=>router.delivery(m)).reverse()});
         case '/v1/message': { const alias=data.from && router.state.keys[`${address(data.from).app}:${data.from.threadId}:${data.id}`]; const message = router.state.messages[alias?.id ?? data.id]; if (!message) throw bad(404, 'Message not found'); return reply(200, { message, job: router.state.jobs[message.id], delivery:router.delivery(message) }); }
-        case '/v1/native': { if (!['codex', 'claude', 'deepseek'].includes(data.app) || !/^\/v1\/(threads|projects|models|capabilities|tasks)(?:[/?]|$)/.test(data.route) || (data.method && data.method !== 'GET')) throw bad(400, 'Read-only native route required'); return reply(200, await router.backendRequest(data.app, data.route)); }
+        case '/v1/native': { if (!['codex', 'claude', 'deepseek', 'antigravity'].includes(data.app) || !/^\/v1\/(threads|projects|models|capabilities|tasks)(?:[/?]|$)/.test(data.route) || (data.method && data.method !== 'GET')) throw bad(400, 'Read-only native route required'); return reply(200, await router.backendRequest(data.app, data.route)); }
         default: throw bad(404, 'Unknown route');
       }
     } catch (error) { const details=errorData(error,500);reply(details.httpStatus,{error:details.message,code:details.code,httpStatus:details.httpStatus,...(error.retryAfterSeconds?{retryAfterSeconds:error.retryAfterSeconds}:{})}); }
   };
   atomic(path.join(router.directory, 'connection.json'), { baseUrl: `http://127.0.0.1:${server.address().port}`, token: router.state.token, pid: process.pid });
   server.removeListener('request',initializing);server.on('request',handleRequest);
-  router.healthTimer=setInterval(()=>{if(!Object.keys(router.state.healthSubscribers).length)return;for(const app of ['codex','claude','deepseek'])void router.healthMonitor.probe(app).catch(()=>{});},30000);router.healthTimer.unref();
-  router.callbackTimer=setInterval(()=>{for(const app of ['codex','claude','deepseek'])void router.callbackForwarder.poll(app).catch(error=>{router.state.callbackErrors??={};router.state.callbackErrors[app]={code:error.code??'CALLBACK_FORWARD_FAILED',message:error.message,at:new Date().toISOString()};router.save();});},3000);router.callbackTimer.unref();
+  router.healthTimer=setInterval(()=>{if(!Object.keys(router.state.healthSubscribers).length)return;for(const app of ['codex','claude','deepseek','antigravity'])void router.healthMonitor.probe(app).catch(()=>{});},30000);router.healthTimer.unref();
+  router.callbackTimer=setInterval(()=>{for(const app of ['codex','claude','deepseek','antigravity'])void router.callbackForwarder.poll(app).catch(error=>{router.state.callbackErrors??={};router.state.callbackErrors[app]={code:error.code??'CALLBACK_FORWARD_FAILED',message:error.message,at:new Date().toISOString()};router.save();});},3000);router.callbackTimer.unref();
   return { router, server, close: () => new Promise(resolve => { router.close(); server.close(resolve); server.closeAllConnections(); }) };
   }catch(error){await new Promise(resolve=>{server.close(resolve);server.closeAllConnections();});throw error;}
 }
