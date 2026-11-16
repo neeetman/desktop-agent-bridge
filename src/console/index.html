@@ -24,6 +24,7 @@
         <button class="nav" data-page="messages"><i data-icon="messages"></i><span>消息</span><em id="nav-messages"></em></button>
         <button class="nav" data-page="compat"><i data-icon="layers"></i><span>适配</span><em id="nav-compat"></em></button>
         <button class="nav" data-page="health"><i data-icon="pulse"></i><span>健康</span><em id="nav-health"></em></button>
+        <button class="nav" data-page="setup"><i data-icon="plug"></i><span>接入</span><em id="nav-setup"></em></button>
         <div class="nav-gap"></div>
         <button class="nav" data-page="settings"><i data-icon="gear"></i><span>设置</span></button>
       </nav>
@@ -136,6 +137,43 @@
               <thead><tr><th>服务</th><th>状态</th><th>PID</th><th>重启</th><th>最近错误</th></tr></thead>
               <tbody id="services"></tbody>
             </table>
+          </section>
+        </section>
+
+        <section data-view="setup" hidden>
+          <div id="setup-summary" class="summary"></div>
+          <section class="panel flush">
+            <div class="panel-head padded">
+              <div><h2>各应用的 MCP 配置与 desktop-bridge skill</h2>
+                <p class="muted">MCP 配置里的 <code>DESKTOP_BRIDGE_CLIENT_REVISION</code> 与 skill 副本各自对照当前仓库版本。</p></div>
+              <button class="secondary" id="setup-check">重新检查</button>
+            </div>
+            <table class="table compact setup-table">
+              <thead><tr><th>应用</th><th>MCP 配置</th><th>desktop-bridge skill</th><th>位置</th></tr></thead>
+              <tbody id="setup-rows"></tbody>
+            </table>
+          </section>
+          <section class="panel" id="setup-preview">
+            <div class="panel-head">
+              <div><h2>将要做的改动</h2>
+                <p class="muted">只改 desktop-bridge 自己的键与 skill 目录；改前备份到 <code>runtime/mcp-config-backups/</code>、<code>runtime/skill-backups/</code>。预览后配置若有变化，需要重新预览。</p></div>
+              <button class="primary" id="setup-apply" disabled>全部安装 / 更新</button>
+            </div>
+            <div id="setup-changes" class="setup-changes"></div>
+            <p id="setup-result" class="muted" role="status"></p>
+          </section>
+          <section class="panel" id="setup-reload">
+            <div class="panel-head">
+              <div><h2>让已运行的会话加载新配置</h2>
+                <p class="muted">写入配置不会改变已启动的 MCP 进程。</p></div>
+              <button class="secondary" id="setup-reload-codex">重新加载 Codex MCP</button>
+            </div>
+            <ul class="checklist">
+              <li><b>Codex</b>：重新加载是全局操作，有会话正在运行、待审批或存在受保护会话时会推迟，空闲后再试。Codex 检测到配置变化后也会在空闲时自行重载。</li>
+              <li><b>Claude</b>：会话重新连接 desktop-bridge 时使用新的客户端（新会话自动生效；已有会话可在空闲时重连）。</li>
+              <li><b>Antigravity</b>、<b>DeepSeek</b>：新会话加载新的 skill；Antigravity 插件的 MCP 在应用重启后生效。</li>
+            </ul>
+            <p id="setup-reload-result" class="muted" role="status"></p>
           </section>
         </section>
 
