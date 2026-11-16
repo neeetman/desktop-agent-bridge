@@ -301,6 +301,7 @@ test('router queues messages for a closed Antigravity desktop and delivers them 
     assert.equal(sends[0].route, `/v1/threads/${ID}/messages`);
     assert.equal(router.delivery(router.state.messages[message.id]).stage, 'delivered');
     assert.throws(() => router.prepareMessage({from: {app: 'antigravity', threadId: ID}, to: {app: 'gemini', threadId: 'x'}, text: 'x'}, 'message'), /antigravity/);
+    await assert.rejects(router.send({from: {app: 'antigravity', threadId: ID}, to: {app: 'antigravity', threadId: 'other'}, text: 'same app'}), {code: 'SAME_APP_FORBIDDEN'});
     const health = await router.health('all');
     assert.ok(health.results.some(row => row.app === 'antigravity'));
   } finally { router.close(); fs.rmSync(directory, {recursive: true, force: true}); }

@@ -81,6 +81,9 @@ The supervisor runs the bridge service only. It never launches, restarts or clos
 
 ## Sender identity
 
+The bridge is cross-app only: Antigravity to Antigravity sends, decisions and task creation are rejected with
+`SAME_APP_FORBIDDEN`; chats in the same app use Antigravity's own `send_message`.
+
 Antigravity starts one stdio MCP server for all chats, so the server process cannot know the chat from its environment.
 Each `tools/call` carries the calling chat in `params._meta`:
 
