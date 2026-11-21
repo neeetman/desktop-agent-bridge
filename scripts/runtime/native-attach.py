@@ -8,13 +8,21 @@ import sys
 import threading
 import frida
 from attachment_runtime import compile_payload, request, AttachmentError
+from desktop_inventory import attach_pid
 
 
 def attach(selected, kind, resume=False):
     request('validate', selected)
     source = compile_payload(selected, kind)
     device = frida.get_local_device()
-    session = device.attach(selected['runningBuild']['pid'])
+    # A suspended launch is attached in its main process; the app server host
+    # does not exist until the desktop resumes.
+    host = selected['profile']['manifests'][kind].get('host')
+    if host is not None:
+        # The Node-API injector needs an addon's napi_env; the Codex app server
+        # host loads no native addon, so an attach there can never evaluate.
+        raise AttachmentError('HOST_INJECTION_UNAVAILABLE', 'Helpers cannot be evaluated in the ' + str(host) + ' process')
+    session = device.attach(attach_pid(selected['runningBuild']['pid'], host))
     installed, finished = threading.Event(), threading.Event()
     errors = []
     script = session.create_script(source)

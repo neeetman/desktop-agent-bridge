@@ -48,6 +48,47 @@ test("renamed classes, module numbers and chunk paths are extracted without exec
     /0 matches/,
   );
 });
+test("Codex 26.1117 layout: helpers target main's connection proxy and manager registry", () => {
+  const host = ".vite/build/app-server-host.js",
+    main = ".vite/build/early-bootstrap-916-x.js";
+  // The host owns the real connection and manager; main has an RPC proxy whose
+  // members are mostly class fields, and the registry of per-host managers.
+  const hosted =
+    "exports.modules={19229(e,t,r){class aP{sendAppServerRequest(){} registerInternalNotificationHandler(){} readThread(){}}},13994(e,t,r){class cR{addConversationStateCallback(){} addApprovalRequestListener(){}}class _r extends cR{getConversation(){} getConversationOrThrow(){} startConversation(){} resumeConversation(){}}}}";
+  const mainSource =
+    "exports.modules={89694(e,t,r){class vq{addConversationStateCallback(){} addApprovalRequestListener(){}}class _Q extends vq{getConversation(){} startConversation(){} resumeConversation(){}}" +
+    "class RE{#el;getConnectionState=()=>'connected';get hostId(){return this.#el}readThread=()=>{};registerInternalNotificationHandler=()=>{};async sendAppServerRequest(){}}" +
+    "class DE{hasConnection(){} getCurrent(){} entryForToken(){} refresh(){} retire(){}}}}";
+  assert.deepEqual(
+    locate("codex", [
+      [main, mainSource],
+      [host, hosted],
+    ]),
+    {
+      connectionModule: main,
+      connectionModuleId: 89694,
+      connectionClass: "RE",
+      registryModuleId: 89694,
+      registryClass: "DE",
+    },
+  );
+  assert.throws(
+    () =>
+      locate("codex", [
+        [main, mainSource.replace("entryForToken", "other")],
+        [host, hosted],
+      ]),
+    /0 matches for registry/,
+  );
+  assert.throws(
+    () =>
+      locate("codex", [
+        [main, mainSource.replace("get hostId", "get otherId")],
+        [host, hosted],
+      ]),
+    /0 matches for proxy/,
+  );
+});
 test("a previously unknown installed build becomes a quarantined candidate without entering the catalog", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "build-candidate-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
