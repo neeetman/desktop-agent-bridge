@@ -86,6 +86,86 @@ async function managerConstructor(manifest,connection,dependencies={}){
  }finally{delete globalThis.__codexBridgeManagerProbe;delete globalThis.__codexBridgeManagerClass;close();}
  throw Error('Native local conversation manager class unavailable');
 }
+// A class that its webpack module does not export, found through the closures of what it does export.
+async function classFromModule(moduleId,className,accept,dependencies={}){
+ const req=dependencies.require??process.mainModule.require.bind(process.mainModule);
+ if(!Number.isSafeInteger(moduleId)||moduleId<=0||typeof className!=='string'||!className)throw Error('Validated module ID and class name are required');
+ const runtime=await webpackRuntime({},moduleId,req,dependencies.app??electronApp(req)),exports=runtime(moduleId),seeds=[];
+ for(const key of Object.keys(exports)){const d=Object.getOwnPropertyDescriptor(exports,key);if(typeof d?.get==='function')seeds.push(d.get);if(typeof d?.value==='function')seeds.push(d.value);}
+ const {post,close}=inspectorSession(req);
+ try{
+  for(const seed of seeds.slice(0,64)){
+   globalThis.__codexBridgeClassProbe=seed;
+   const fn=await post('Runtime.evaluate',{expression:'globalThis.__codexBridgeClassProbe'});
+   const entry=(await closureEntries(post,fn.result.objectId)).find(e=>e.name===className&&e.value?.type==='function');
+   if(!entry)continue;
+   await post('Runtime.callFunctionOn',{objectId:entry.value.objectId,functionDeclaration:'function(){globalThis.__codexBridgeClass=this;return true}',returnByValue:true});
+   const ctor=globalThis.__codexBridgeClass;
+   if(typeof ctor==='function'&&accept(ctor.prototype))return ctor;
+  }
+ }finally{delete globalThis.__codexBridgeClassProbe;delete globalThis.__codexBridgeClass;close();}
+ throw Error('Validated desktop class '+className+' unavailable');
+}
+// Codex 26.1117+: the main process holds an RPC proxy of the app server connection, and the
+// conversation manager lives in the app server host. Main reaches the manager through its
+// manager registry, as Codex itself does: registry.getCurrent(hostId).resource.control.openClient().
+async function rpcConnection(manifest,dependencies={}){
+ const ctor=await classFromModule(manifest.connectionModuleId,manifest.connectionClass,p=>typeof p?.sendAppServerRequest==='function',dependencies);
+ const rows=(await liveInstances(ctor,dependencies)).filter(x=>x.hostId==='local'&&typeof x.getConnectionState==='function'&&x.getConnectionState()==='connected');
+ if(rows.length!==1)throw Error('Unique local app-server connection unavailable');
+ return rows[0];
+}
+async function rpcManagerClient(manifest,dependencies={}){
+ const ctor=await classFromModule(manifest.registryModuleId,manifest.registryClass,p=>typeof p?.getCurrent==='function'&&typeof p?.hasConnection==='function',dependencies);
+ const controls=(await liveInstances(ctor,dependencies)).filter(x=>!x.disposed).map(x=>x.getCurrent('local')?.resource?.control).filter(x=>x&&typeof x.openClient==='function');
+ if(controls.length!==1)throw Error('Unique local conversation manager unavailable');
+ const client=await controls[0].openClient();
+ if(!client)throw Error('Conversation manager client unavailable');
+ return client;
+}
+function disposeClient(client){try{client?.[Symbol.dispose]?.();}catch{}}
+// Inputs a desktop chat is created with. The renderer adds its own dynamic tools; a chat created
+// from the main process has none, and the bridge reaches it through MCP instead.
+function creationInputs(){return {hasDesktopRuntime:true,hasLocalRuntime:true,hasDeveloperInstructions:true,isBrowserRuntime:false,usesDesktopMcp:true,everydayWork:false,sidebarSectionToolsEnabled:true,readDynamicTools:async()=>({kind:'dynamic',tools:[]})};}
+// One awaited manager API for both layouts. Creation and resume inputs are supplied here:
+// from the in-process manager's settings before 26.1117, by the app server host itself after.
+function legacyFacade(m){
+ const inputs=async()=>({...creationInputs(),usesDesktopMcp:m.settings.usesDesktopMcp,readDynamicTools:m.settings.readDynamicTools});
+ return {kind:'in-process',hostId:m.hostId,get disposed(){return !!m.disposed;},
+  readThread:(id,options)=>m.readThread(id,options),getConversation:async id=>m.getConversation(id),getThreadExecutionState:async id=>m.getThreadExecutionState(id),
+  startConversation:args=>m.startConversation(args,{readThreadCreationInputs:inputs}),
+  resumeConversation:args=>m.resumeConversation(args,{readResumeInputs:async({model,cwd})=>m.settings.readSettings(model,cwd)}),
+  updateThreadSettingsForNextTurn:(id,settings)=>m.updateThreadSettingsForNextTurn(id,settings),setThreadTitle:(id,title)=>m.setThreadTitle(id,title),
+  getThreadProjectAssignment:async id=>m.getThreadProjectAssignment(id),
+  observe:(onState,onApproval)=>[m.addConversationStateCallback(onState),m.addApprovalRequestListener(e=>onApproval(e.conversationId??e.threadId,m.getConversation(e.conversationId??e.threadId)))],
+  dispose(){}};
+}
+// A failed call marks the client stale; the next request reopens it and never replays this one.
+function rpcFacade(client){
+ let stale=false;const call=fn=>async(...args)=>{try{return await fn(...args);}catch(error){stale=true;throw error;}};
+ return {kind:'manager-rpc',hostId:'local',get disposed(){return stale;},
+  readThread:call((id,options)=>client.readThread(id,options)),getConversation:call(id=>client.getConversation(id)),getThreadExecutionState:call(id=>client.getThreadExecutionState(id)),
+  startConversation:call(args=>client.startConversation(args,{readThreadCreationInputs:async()=>creationInputs()})),
+  resumeConversation:call(args=>client.resumeConversation(args)),
+  updateThreadSettingsForNextTurn:call((id,settings)=>client.updateThreadSettingsForNextTurn(id,settings)),setThreadTitle:call((id,title)=>client.setThreadTitle(id,title)),
+  // Project assignment lives in the host's workspace storage, which the client does not expose.
+  getThreadProjectAssignment:async()=>null,
+  observe:()=>[],
+  dispose(){stale=true;disposeClient(client);}};
+}
+// The live local connection and manager facade for a manifest.
+async function resolveConnection(manifest,dependencies={}){
+ if(manifest.connectionClass)return rpcConnection(manifest,dependencies);
+ const rows=localConnection(await liveInstances(await connectionConstructor(manifest,dependencies),dependencies));
+ if(rows.length!==1)throw Error('Unique local app-server connection unavailable');
+ return rows[0];
+}
+async function resolveManager(manifest,connection,dependencies={}){
+ if(manifest.registryClass)return rpcFacade(await rpcManagerClient(manifest,dependencies));
+ const rows=localManager(await liveInstances(await managerConstructor(manifest,connection,dependencies),dependencies));
+ if(rows.length!==1)throw Error('Unique live conversation manager unavailable');
+ return legacyFacade(rows[0]);
+}
 // Live instances of a constructor, through the inspector heap query.
 async function liveInstances(ctor,dependencies={}){
  const req=dependencies.require??process.mainModule.require.bind(process.mainModule);
@@ -103,4 +183,4 @@ function localManager(rows){return rows.filter(x=>x.hostId==='local'&&!x.dispose
 function desktopVersion(manifest,req,proc=process){const app=electronApp(req,proc);return app?app.getVersion():manifest.version;}
 function homeDirectory(req,proc=process){const app=electronApp(req,proc);return app?app.getPath('home'):req('node:os').homedir();}
 function reloadBlockReason(protection){return Array.isArray(protection?.threadIds)&&protection.threadIds.length?'Global MCP reload deferred: protected desktop chats are configured':null;}
-module.exports={APP_SERVER_HOST,hostMismatch,connectionConstructor,managerConstructor,liveInstances,localConnection,localManager,desktopVersion,homeDirectory,reloadBlockReason};
+module.exports={APP_SERVER_HOST,hostMismatch,connectionConstructor,managerConstructor,classFromModule,rpcConnection,rpcManagerClient,disposeClient,creationInputs,legacyFacade,rpcFacade,resolveConnection,resolveManager,liveInstances,localConnection,localManager,desktopVersion,homeDirectory,reloadBlockReason};

@@ -4,7 +4,7 @@
   "platform": "win32",
   "arch": "x64",
   "app": "codex",
-  "id": "codex-26.1117.4957.0-8a437aad94098770",
+  "id": "codex-26.1117.4957.0-8a437aad94098770-rpc",
   "packageVersion": "26.1117.4957.0",
   "capabilities": [
     "read",
@@ -27,23 +27,23 @@
       "executableSha256": "21c2eac7703b43611392234738f669a8af23907585b231ebde54ca3cb104cc82",
       "chromeSha256": "0db43d9385011630242c68e95c5fe7534e8a71a23e81f06a3be7a83185cc8022",
       "asarSha256": "8a437aad94098770c1bf5fd5385c204e162b62c6d7917f688741d74e05babe90",
-      "connectionModule": ".vite/build/app-server-host.js",
-      "connectionModuleId": 19229,
-      "host": "app-server-host",
-      "managerClass": "_r",
-      "managerModuleId": 13994,
-      "helperRevision": "a03cbfdb44cf1dae"
+      "connectionModule": ".vite/build/early-bootstrap-916-2fd4cc5178eaa3b5.js",
+      "connectionModuleId": 89694,
+      "connectionClass": "RE",
+      "registryModuleId": 89694,
+      "registryClass": "DE",
+      "helperRevision": "e62517a4106b643f"
     },
     "mcp": {
       "version": "26.1117.4957.0",
       "executableSha256": "21c2eac7703b43611392234738f669a8af23907585b231ebde54ca3cb104cc82",
       "chromeSha256": "0db43d9385011630242c68e95c5fe7534e8a71a23e81f06a3be7a83185cc8022",
       "asarSha256": "8a437aad94098770c1bf5fd5385c204e162b62c6d7917f688741d74e05babe90",
-      "connectionModule": ".vite/build/app-server-host.js",
-      "connectionModuleId": 19229,
-      "host": "app-server-host",
+      "connectionModule": ".vite/build/early-bootstrap-916-2fd4cc5178eaa3b5.js",
+      "connectionModuleId": 89694,
+      "connectionClass": "RE",
       "reloadOnAttach": false,
-      "helperRevision": "5a03501f8a9989a6"
+      "helperRevision": "ed3c6f688c3cacd7"
     }
   },
   "hashes": {
@@ -51,13 +51,13 @@
     "asarSha256": "8a437aad94098770c1bf5fd5385c204e162b62c6d7917f688741d74e05babe90",
     "chromeSha256": "0db43d9385011630242c68e95c5fe7534e8a71a23e81f06a3be7a83185cc8022"
   },
-  "adapterDigest": "58cc4ec71b4593a616543adf3d27ec078c70f6855fae5ac42902e81a7f363db1",
+  "adapterDigest": "9a433a630da3f17fb2fe35e365474599681130553c9740335d0c5977650cb32f",
   "revoked": false,
   "evidence": {
-    "baseline": "Installed Windows desktop bundle inspection, 2026-11-22: app server connection and conversation manager moved to the App server host utility process",
+    "baseline": "Installed bundle inspection and a live read-only main-process probe, 2026-11-22: helpers stay in the main process and reach the app server host manager over Codex RPC",
     "validated": [
-      "AppServerConnection class aP in module 19229 of app-server-host.js",
-      "conversation manager class _r in module 13994 of app-server-host.js, constructed only in the host process"
+      "main connection proxy RE and manager registry DE in module 89694",
+      "registry.getCurrent(\"local\").resource.control.openClient() answered readThread, getThreadExecutionState and getConversation"
     ],
     "record": "docs/validation-codex-app-server-host-1122.md"
   }

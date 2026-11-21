@@ -61,8 +61,8 @@ module.exports = function operations(config, req) {
       const row = await manager.readThread(id, { includeTurns: false });
       if (
         row.thread?.status?.type !== "idle" ||
-        manager.getThreadExecutionState(id)?.inProgress ||
-        manager.getConversation(id)?.requests?.length
+        (await manager.getThreadExecutionState(id))?.inProgress ||
+        (await manager.getConversation(id))?.requests?.length
       )
         throw Error("DEFERRED: Codex chat active or awaiting approval");
     };
@@ -90,18 +90,6 @@ module.exports = function operations(config, req) {
           threadStartKind: "default",
           permissionsConfig: permissions("read-only"),
           config: policy.nativeConfig(sandbox("read-only")),
-        },
-        {
-          readThreadCreationInputs: async () => ({
-            hasDesktopRuntime: true,
-            hasLocalRuntime: true,
-            hasDeveloperInstructions: true,
-            isBrowserRuntime: false,
-            usesDesktopMcp: manager.settings.usesDesktopMcp,
-            readDynamicTools: manager.settings.readDynamicTools,
-            sidebarSectionToolsEnabled: true,
-            everydayWork: false,
-          }),
         },
       );
       if (
@@ -131,7 +119,7 @@ module.exports = function operations(config, req) {
         path.resolve(row.thread.cwd) !== path.resolve(cwd)
       )
         throw Error("Created Codex chat identity or workspace mismatch");
-      const chat = manager.getConversation(created);
+      const chat = await manager.getConversation(created);
       if (chat?.latestModel !== CODEX_MODEL || chat?.latestReasoningEffort !== CODEX_EFFORT)
         throw Error("Codex validation chat did not confirm " + CODEX_MODEL + " / " + CODEX_EFFORT + "; inspect before retrying");
       return { threadId: created, cwd, model: chat.latestModel, reasoningEffort: chat.latestReasoningEffort };
@@ -140,22 +128,16 @@ module.exports = function operations(config, req) {
       if (!created) throw Error("No disposable chat for permission test");
       await idle(created);
       once(method);
-      const chat = manager.getConversation(created);
-      const resumed = await manager.resumeConversation(
-        {
-          conversationId: created,
-          cwd,
-          workspaceRoots: [cwd],
-          model: chat?.latestModel ?? null,
-          reasoningEffort: chat?.latestReasoningEffort ?? null,
-          permissions: permissions("read-only"),
-          collaborationMode: chat?.latestCollaborationMode ?? null,
-        },
-        {
-          readResumeInputs: async ({ model, cwd }) =>
-            manager.settings.readSettings(model, cwd),
-        },
-      );
+      const chat = await manager.getConversation(created);
+      const resumed = await manager.resumeConversation({
+        conversationId: created,
+        cwd,
+        workspaceRoots: [cwd],
+        model: chat?.latestModel ?? null,
+        reasoningEffort: chat?.latestReasoningEffort ?? null,
+        permissions: permissions("read-only"),
+        collaborationMode: chat?.latestCollaborationMode ?? null,
+      });
       if (resumed.status === "not-ready")
         throw Error("Disposable Codex chat could not resume");
       await idle(created);
@@ -168,7 +150,7 @@ module.exports = function operations(config, req) {
           });
         let settings;
         for (let i = 0; i < 20; i++) {
-          settings = manager.getConversation(created)?.latestThreadSettings;
+          settings = (await manager.getConversation(created))?.latestThreadSettings;
           if (
             applied !== false &&
             settings?.sandboxPolicy?.type === native.sandboxPolicy.type &&
@@ -211,11 +193,7 @@ module.exports = function operations(config, req) {
         input: [], cwd, workspaceRoots: [cwd], workspaceKind: "projectless",
         initialTitle: title + " full access", mode: "default", threadSource: "user",
         threadStartKind: "default", permissionsConfig: native, config: policy.nativeConfig(full),
-      }, { readThreadCreationInputs: async () => ({
-        hasDesktopRuntime: true, hasLocalRuntime: true, hasDeveloperInstructions: true,
-        isBrowserRuntime: false, usesDesktopMcp: manager.settings.usesDesktopMcp,
-        readDynamicTools: manager.settings.readDynamicTools, sidebarSectionToolsEnabled: true, everydayWork: false,
-      }) });
+      });
       if (result.status !== "created" || !result.conversationId || result.conversationId === created)
         throw Error("Unexpected full-access creation result");
       const id = result.conversationId;
@@ -223,10 +201,9 @@ module.exports = function operations(config, req) {
       if (row.thread?.id !== id || path.resolve(row.thread.cwd) !== path.resolve(cwd))
         throw Error("Full-access chat identity or workspace mismatch");
       const resumed = await manager.resumeConversation({ conversationId:id, cwd, workspaceRoots:[cwd],
-        model:null, reasoningEffort:null, permissions:native, collaborationMode:null },
-        { readResumeInputs: async ({model,cwd}) => manager.settings.readSettings(model,cwd) });
+        model:null, reasoningEffort:null, permissions:native, collaborationMode:null });
       if (resumed.status === "not-ready") throw Error("Full-access chat could not resume");
-      const settings = manager.getConversation(id)?.latestThreadSettings;
+      const settings = (await manager.getConversation(id))?.latestThreadSettings;
       if (settings?.sandboxPolicy?.type !== "dangerFullAccess" || settings.approvalPolicy !== "never")
         throw Error("Full-access creation settings could not be read back");
       return { threadId:id, cwd, sandboxMode:"danger-full-access", approvalPolicy:"never" };

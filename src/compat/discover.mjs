@@ -49,21 +49,14 @@ function* chunks(file) {
 }
 
 // Codex 26.1117+ forks this bundle as an Electron utility process that owns the
-// app server connection and the conversation manager.
+// app server connection and the conversation manager. Helpers cannot be evaluated
+// there, so they stay in the main process and reach the manager over Codex's own RPC.
 const APP_SERVER_HOST_FILE = /^\.vite\/build\/app-server-host\.js$/;
-// The 26.1117 manager inherits its listener methods from a base class.
-const HOSTED_MANAGER = [
-  "getConversation",
-  "getConversationOrThrow",
-  "startConversation",
-  "resumeConversation",
-  "getThreadExecutionState",
-  "updateThreadSettingsForNextTurn",
-];
+const memberName = (m) =>
+  m.key?.type === "PrivateIdentifier" ? null : (m.key?.name ?? m.key?.value);
 
 export function locate(app, files) {
-  const hits = { connection: [], manager: [], session: [] },
-    hosted = [];
+  const hits = { connection: [], manager: [], session: [], proxy: [], registry: [] };
   for (const [file, source] of files) {
     if (
       app === "claude"
@@ -92,10 +85,16 @@ export function locate(app, files) {
     } else {
       ancestor(tree, {
         Class(n, parents) {
+          const instance = n.body.body.filter((m) => !m.static);
           const methods = new Set(
-            n.body.body
-              .filter((m) => m.type === "MethodDefinition" && !m.static)
-              .map((m) => m.key.name),
+            instance
+              .filter((m) => m.type === "MethodDefinition" && m.kind === "method")
+              .map(memberName),
+          );
+          // Fields and getters count for proxies whose members are arrow functions.
+          const members = new Set(instance.map(memberName));
+          const getters = new Set(
+            instance.filter((m) => m.kind === "get").map(memberName),
           );
           const module = parents.findLast(
             (p) =>
@@ -126,10 +125,19 @@ export function locate(app, files) {
             hits.manager.push(row);
           if (
             row.name &&
-            n.superClass &&
-            HOSTED_MANAGER.every((k) => methods.has(k))
+            !APP_SERVER_HOST_FILE.test(file) &&
+            methods.has("sendAppServerRequest") &&
+            !methods.has("readThread") &&
+            getters.has("hostId") &&
+            ["readThread", "registerInternalNotificationHandler", "getConnectionState"].every((k) => members.has(k))
           )
-            hosted.push(row);
+            hits.proxy.push(row);
+          if (
+            row.name &&
+            !APP_SERVER_HOST_FILE.test(file) &&
+            ["getCurrent", "hasConnection", "entryForToken", "refresh", "retire"].every((k) => methods.has(k))
+          )
+            hits.registry.push(row);
         },
       });
     }
@@ -146,20 +154,25 @@ export function locate(app, files) {
   }
   if (app === "claude")
     return { sessionModule: one("session"), workerPidField: "cliPid" };
-  const connection = one("connection"),
-    host = APP_SERVER_HOST_FILE.test(connection.file) ? "app-server-host" : null;
-  // In the app server host the manager must live in the connection's own bundle.
-  if (host && !hits.manager.length)
-    hits.manager = hosted.filter((row) => row.file === connection.file);
-  const manager = one("manager");
-  if (host && manager.file !== connection.file)
-    throw Error("Manual analysis required: manager is outside the app server host");
+  const connection = one("connection");
+  if (!APP_SERVER_HOST_FILE.test(connection.file)) {
+    const manager = one("manager");
+    return {
+      connectionModule: connection.file,
+      connectionModuleId: connection.id,
+      managerModuleId: manager.id,
+      managerClass: manager.name,
+    };
+  }
+  // The connection lives in the app server host; main holds its proxy and the manager registry.
+  const proxy = one("proxy"),
+    registry = one("registry");
   return {
-    connectionModule: connection.file,
-    connectionModuleId: connection.id,
-    managerModuleId: manager.id,
-    managerClass: manager.name,
-    ...(host ? { host } : {}),
+    connectionModule: proxy.file,
+    connectionModuleId: proxy.id,
+    connectionClass: proxy.name,
+    registryModuleId: registry.id,
+    registryClass: registry.name,
   };
 }
 
@@ -222,12 +235,10 @@ export async function discover(
         connectionModule: contract.connectionModule,
         connectionModuleId: contract.connectionModuleId,
       });
-      if (contract.host) m.host = contract.host;
-      else delete m.host;
-      if (kind === "execution") {
-        const { host, ...execution } = contract;
-        Object.assign(m, execution);
-      }
+      for (const key of ["host", "connectionClass", "registryModuleId", "registryClass", "managerModuleId", "managerClass"])
+        delete m[key];
+      if (contract.connectionClass) m.connectionClass = contract.connectionClass;
+      if (kind === "execution") Object.assign(m, contract);
     }
   }
   p.evidence = {

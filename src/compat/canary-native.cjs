@@ -37,20 +37,10 @@ function attach(config, operations) {
     if (config.app === "codex") {
       if (method !== "probe") return advanced.codex(method);
       const manifest = config.manifest;
-      const connections = runtime.localConnection(
-        await runtime.liveInstances(await runtime.connectionConstructor(manifest)),
-      );
-      if (connections.length !== 1)
-        throw Error("Unique live app-server connection unavailable");
-      const managers = runtime.localManager(
-        await runtime.liveInstances(
-          await runtime.managerConstructor(manifest, connections[0]),
-        ),
-      );
-      if (managers.length !== 1)
-        throw Error("Unique live conversation manager unavailable");
-      advanced.bound(connections[0], managers[0]);
-      return { connected: true, helperPid: process.pid, host: manifest.host ?? "main" };
+      const connection = await runtime.resolveConnection(manifest);
+      const manager = await runtime.resolveManager(manifest, connection);
+      advanced.bound(connection, manager);
+      return { connected: true, helperPid: process.pid, transport: manager.kind };
     }
     const page = webContents
       .getAllWebContents()

@@ -19,10 +19,10 @@ function install(root,configBinding={}) {
   const config = path.join(process.env.CODEX_HOME || runtime.homeDirectory(req, process) + '/.codex', 'config.toml');
   const fingerprint = () => crypto.createHash('sha256').update(fs.readFileSync(config)).digest('hex');
   async function findConnection() {
-    const constructor=await runtime.connectionConstructor(compatibility);
-    if (connection && !connection.disposed && connection.connectionState === 'connected') return connection;
-    const found = runtime.localConnection(await runtime.liveInstances(constructor))[0];
-    if (!found) throw new Error('Local desktop app-server connection is not ready');
+    const live = c => c && !c.disposed && (typeof c.getConnectionState === 'function' ? c.getConnectionState() : c.connectionState) === 'connected';
+    if (live(connection)) return connection;
+    let found;
+    try { found = await runtime.resolveConnection(compatibility); } catch { throw new Error('Local desktop app-server connection is not ready'); }
     connection = found;
     state.state = 'connected'; persist(); return connection;
   }
