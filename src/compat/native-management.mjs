@@ -20,9 +20,17 @@ export async function helperStatus(selection,kind){
  const ready=selection.app==='claude'?value.records?.some(row=>row.attaches>0&&!row.error):kind==='execution'?value.ready:value.state==='connected';
  return {ready:!!ready,binding:value.binding,kind};
 }
-export async function idleProbe(previous,app){
+export async function idleProbe(previous,app,wire=executionWire){
  const params={binding:previous.binding,expiresAt:Date.now()+10000};
- return app==='claude'?lifecycleWire('maintenance',{payload:params}):executionWire('maintenance',params);
+ if(app==='claude')return lifecycleWire('maintenance',{payload:params});
+ try{return await wire('maintenance',params);}
+ catch(error){
+  // No execution helper is listening, so no helper operation can be in flight and none is
+  // replaced. This is the case when the previous profile's helper could never be installed
+  // (Codex 26.1117 host profile). Every other failure still blocks activation.
+  if(error?.code==='ENOENT')return {authoritative:true,idle:true,previousHelper:'absent'};
+  throw error;
+ }
 }
 export async function attachProbe(selection){
  const caps=selection.profile.capabilities;

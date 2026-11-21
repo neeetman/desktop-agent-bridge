@@ -14,7 +14,15 @@ Certification of this build had failed at discovery with "found 0 matches for ma
 - The helpers and the canary probe check that they run in the process their manifest names. They no longer depend on Electron's `app` object, and they can find the manager class through the closures of its module's exports, not only through the connection's `getStatsigEvaluations` option.
 - Catalog profile `codex-26.1117.4957.0-8a437aad94098770` matches the installed bytes. With it, read and send through the desktop native pipe work again: `bridge_health` reports `native_threads` ok.
 
-## Open: injected helpers on this build
+## Resolved: helpers stay in main and use Codex's RPC
+
+The helpers now run in the main process. The connection is main's RPC proxy, `RE`, and the conversation manager is the host's, reached through main's manager registry (`DE`, module 89694), as described below. A read-only probe confirmed the RPC calls. Certification run `11245a11` then passed read, send, create, permissions, full access and MCP on dedicated test chats (`gpt-6.1-terra` / `low`). Profile `codex-26.1117.4957.0-8a437aad94098770-caps-11245a11` was imported and activated. Both helpers report ready in the main process.
+
+Activation needed one fix. Its idle check asks the previous profile's execution helper, and the previous (host) profile's helper never existed. A missing helper pipe (`ENOENT`) now counts as "nothing to replace"; every other failure still blocks.
+
+Chats created from the main process get no renderer dynamic tools. The bridge reaches them through MCP.
+
+## History: why the helpers could not run in the host
 
 The native injector evaluates helper code from a Node-API callback, so it needs an addon's `napi_env`. The app server host loads no native addon (`better-sqlite3` is a lazy external that ordinary use does not load), so an attach there never evaluates. The attach scripts and the monitor refuse host manifests with `HOST_INJECTION_UNAVAILABLE`, so they no longer attach Frida to the process that hosts every chat.
 
