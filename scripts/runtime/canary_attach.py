@@ -6,7 +6,7 @@ import sys
 import threading
 import subprocess
 import frida
-from desktop_inventory import desktop_rows, process_rows
+from desktop_inventory import attach_pid, desktop_rows, process_rows
 
 def attach(data):
     build = data['build']
@@ -26,7 +26,11 @@ def attach(data):
     if app == 'codex':
         source = source.replace("Process.getModuleByName('Claude.exe')", "Process.getModuleByName('chrome.dll')")
     event = threading.Event()
-    session = frida.attach(build['pid'])
+    if data.get('host') is not None:
+        # The Node-API injector needs an addon's napi_env; the Codex app server
+        # host loads no native addon, so an attach there can never evaluate.
+        raise RuntimeError('Helpers cannot be evaluated in the ' + str(data['host']) + ' process')
+    session = frida.attach(attach_pid(build['pid'], data.get('host')))
     try:
         script = session.create_script(source.replace('__APPLICATION_CODE__', json.dumps(data['code'])))
         errors = []

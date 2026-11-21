@@ -1,96 +1,56 @@
 // Runs in the existing Electron main thread. Advanced mutations are confined
 // to the disposable fixture, or to the separately idle-checked MCP operation.
 function attach(config, operations) {
-  if (process.type !== "browser") return JSON.stringify({ installed: false });
+  if (!process.mainModule) return JSON.stringify({ installed: false });
   const req = process.mainModule.require.bind(process.mainModule);
+  const path = req("node:path");
+  // Codex 26.1117+ runs its app server connection in a utility process.
+  const runtime =
+    config.app === "codex"
+      ? req(path.join(config.adapterRoot, "codex-runtime.cjs"))
+      : null;
+  const wrongHost = runtime
+    ? runtime.hostMismatch(config.manifest, process)
+    : process.type === "browser"
+      ? null
+      : "not the desktop main process";
+  if (wrongHost) return JSON.stringify({ installed: false, reason: wrongHost });
   const advanced = operations(config,req);
   if (!req("node:worker_threads").isMainThread)
     return JSON.stringify({ installed: false });
-  const { app, webContents } = req("electron");
-  const net = req("node:net"),
-    path = req("node:path");
+  const { app, webContents } = process.type === "browser" ? req("electron") : {};
+  const net = req("node:net");
   const sock = net.connect(config.port, "127.0.0.1");
   const write = (value) => sock.write(JSON.stringify(value) + "\n");
   sock.on("error", () => sock.destroy());
   const expiry = setTimeout(() => sock.destroy(), config.duration);
   expiry.unref();
   sock.on("close", () => clearTimeout(expiry));
-  sock.on("connect", () => write({ token: config.token, pid: process.pid }));
+  // The validation channel is bound to the desktop main process; a helper in the
+  // app server host reports its parent, which is that main process.
+  const desktopPid = config.manifest?.host ? process.ppid : process.pid;
+  sock.on("connect", () =>
+    write({ token: config.token, pid: desktopPid, helperPid: process.pid }),
+  );
   let buffer = "";
   async function call({ method, text }) {
     if (config.app === "codex") {
       if (method !== "probe") return advanced.codex(method);
       const manifest = config.manifest;
-      const ctor = await req(
-        path.join(config.adapterRoot, "codex-runtime.cjs"),
-      ).connectionConstructor(manifest);
-      const session = new (req("node:inspector").Session)();
-      session.connect();
-      const post = (method, params) =>
-        new Promise((resolve, reject) =>
-          session.post(method, params, (e, v) => (e ? reject(e) : resolve(v))),
-        );
-      const key = "__bridgeCanary" + config.token;
-      globalThis[key] = ctor.prototype;
-      try {
-        const proto = await post("Runtime.evaluate", {
-          expression: "globalThis." + key,
-        });
-        const objects = await post("Runtime.queryObjects", {
-          prototypeObjectId: proto.result.objectId,
-        });
-        const callback = await post("Runtime.callFunctionOn", {
-          objectId: objects.objects.objectId,
-          functionDeclaration:
-            'function(key){const matches=this.filter(x=>x.options?.hostId==="local"&&!x.disposed&&x.connectionState==="connected");if(matches.length!==1)return;globalThis[key]=matches[0];return matches[0].options.getStatsigEvaluations}',
-          arguments:[{value:key}],
-        });
-        const props = await post("Runtime.getProperties", {
-          objectId: callback.result.objectId,
-        });
-        const scopes = props.internalProperties.find(
-          (p) => p.name === "[[Scopes]]",
-        );
-        const list = await post("Runtime.getProperties", {
-          objectId: scopes.value.objectId,
-          ownProperties: true,
-        });
-        for (const scope of list.result.filter((s) =>
-          s.value?.description?.startsWith("Closure"),
-        )) {
-          const vars = await post("Runtime.getProperties", {
-            objectId: scope.value.objectId,
-            ownProperties: true,
-          });
-          const cls = vars.result.find(
-            (v) =>
-              v.name === manifest.managerClass && v.value?.type === "function",
-          );
-          if (!cls) continue;
-          const prototype = await post("Runtime.callFunctionOn", {
-            objectId: cls.value.objectId,
-            functionDeclaration: "function(){return this.prototype}",
-          });
-          const instances = await post("Runtime.queryObjects", {
-            prototypeObjectId: prototype.result.objectId,
-          });
-          const match = await post("Runtime.callFunctionOn", {
-            objectId: instances.objects.objectId,
-            functionDeclaration:
-              'function(key){const rows=this.filter(x=>x.hostId==="local"&&!x.disposed&&["getConversation","readThread"].every(k=>typeof x[k]==="function"));if(rows.length===1)globalThis[key]={connection:globalThis[key],manager:rows[0]};return rows.length}',
-            arguments:[{value:key}],
-            returnByValue: true,
-          });
-          if (match.result.value === 1) {
-            advanced.bound(globalThis[key].connection,globalThis[key].manager);
-            return { connected:true };
-          }
-        }
+      const connections = runtime.localConnection(
+        await runtime.liveInstances(await runtime.connectionConstructor(manifest)),
+      );
+      if (connections.length !== 1)
+        throw Error("Unique live app-server connection unavailable");
+      const managers = runtime.localManager(
+        await runtime.liveInstances(
+          await runtime.managerConstructor(manifest, connections[0]),
+        ),
+      );
+      if (managers.length !== 1)
         throw Error("Unique live conversation manager unavailable");
-      } finally {
-        delete globalThis[key];
-        session.disconnect();
-      }
+      advanced.bound(connections[0], managers[0]);
+      return { connected: true, helperPid: process.pid, host: manifest.host ?? "main" };
     }
     const page = webContents
       .getAllWebContents()

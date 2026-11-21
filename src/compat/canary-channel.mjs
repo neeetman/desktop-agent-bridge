@@ -101,6 +101,7 @@ export async function openChannel(candidate, threadId, runId, duration) {
     JSON.stringify({
       build: candidate.build,
       adapterRoot: candidate.adapterRoot,
+      host: config.manifest.host ?? null,
       callbackWaitMs: app === "codex" ? CODEX_CALLBACK_WAIT_MS : 40000,
       code: "(" + attach.toString() + ")(" + JSON.stringify(config) + ","+operations.toString()+")",
     }),

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from desktop_inventory import cim_time, desktop_rows, process_rows, installed_packages
+from desktop_inventory import app_server_host, attach_pid, cim_time, desktop_rows, process_rows, installed_packages
 
 
 class DesktopInventoryTests(unittest.TestCase):
@@ -37,6 +37,28 @@ class DesktopInventoryTests(unittest.TestCase):
             # Win32 and CIM may spell the same loaded image differently. Keep
             # the existing generation stable rather than replacing its helper.
             self.assertEqual(desktop_rows([lower]), desktop_rows([rows[0]]))
+
+    def test_codex_app_server_host_is_the_utility_that_owns_the_app_server(self):
+        exe = r'C:\Program Files\WindowsApps\OpenAI.Codex_1\app\ChatGPT.exe'
+        server = r'C:\Program Files\WindowsApps\OpenAI.Codex_1\app\resources\codex.exe'
+        utility = '"' + exe + '" --type=utility --utility-sub-type=node.mojom.NodeService --lang=zh-CN'
+        rows = [{'Name': 'ChatGPT.exe', 'ProcessId': 100, 'ParentProcessId': 1, 'ExecutablePath': exe, 'CommandLine': '"' + exe + '"'},
+                {'Name': 'ChatGPT.exe', 'ProcessId': 101, 'ParentProcessId': 100, 'ExecutablePath': exe, 'CommandLine': utility},
+                {'Name': 'ChatGPT.exe', 'ProcessId': 102, 'ParentProcessId': 100, 'ExecutablePath': exe, 'CommandLine': utility},
+                {'Name': 'codex.exe', 'ProcessId': 201, 'ParentProcessId': 101, 'ExecutablePath': server, 'CommandLine': '"' + server + '" app-server --analytics-default-enabled'},
+                {'Name': 'codex.exe', 'ProcessId': 202, 'ParentProcessId': 100, 'ExecutablePath': server, 'CommandLine': '"' + server + '" exec-server'}]
+        # The Git worker (102) is also a NodeService utility; only the app server's parent qualifies.
+        self.assertEqual(app_server_host(100, rows), 101)
+        self.assertEqual(attach_pid(100, 'app-server-host', rows), 101)
+        self.assertEqual(attach_pid(100, None, rows), 100)
+        with self.assertRaisesRegex(RuntimeError, 'found 0'):
+            app_server_host(100, rows[:3] + rows[4:])
+        with self.assertRaisesRegex(RuntimeError, 'found 2'):
+            app_server_host(100, rows + [dict(rows[3], ProcessId=203, ParentProcessId=102)])
+        with self.assertRaisesRegex(RuntimeError, 'not running'):
+            app_server_host(999, rows)
+        with self.assertRaisesRegex(RuntimeError, 'Unsupported'):
+            attach_pid(100, 'renderer', rows)
 
     def test_orphaned_helper_of_an_exited_desktop_is_not_a_second_desktop(self):
         with tempfile.TemporaryDirectory() as temporary:

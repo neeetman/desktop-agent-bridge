@@ -70,7 +70,7 @@ def monitor(app, launch=None):
                     outcome.clear()
                 if worker and worker.is_alive():
                     state.update(state='attaching')
-                elif outcome.get('key') == previous_key and outcome.get('code') in ['IDENTITY_MISMATCH', 'CONTRACT_MISMATCH', 'REFRESH_DEFERRED_BUSY']:
+                elif outcome.get('key') == previous_key and outcome.get('code') in ['IDENTITY_MISMATCH', 'CONTRACT_MISMATCH', 'REFRESH_DEFERRED_BUSY', 'HOST_INJECTION_UNAVAILABLE']:
                     state.update(state='incompatible', code=outcome['code'], error=outcome.get('error'))
                     if time.monotonic() >= retry_at:
                         value = subprocess.run(['node', str(source_file(ROOT, 'compat-helper-status.mjs')), app], input=json.dumps(selected), capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)

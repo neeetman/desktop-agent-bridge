@@ -1,7 +1,8 @@
 function install(root,config={}){
- if(process.type!=='browser')return JSON.stringify({installed:false});const req=process.mainModule.require.bind(process.mainModule);if(!req('node:worker_threads').isMainThread)return JSON.stringify({installed:false});
- const fs=req('node:fs'),path=req('node:path'),net=req('node:net'),crypto=req('node:crypto'),inspector=req('node:inspector'),{app}=req('electron');
+ if(!process.mainModule)return JSON.stringify({installed:false});const req=process.mainModule.require.bind(process.mainModule);if(!req('node:worker_threads').isMainThread)return JSON.stringify({installed:false});
+ const fs=req('node:fs'),path=req('node:path'),net=req('node:net'),crypto=req('node:crypto');
  const adapterRoot=config.adapterRoot??root,manifest=config.manifest??JSON.parse(fs.readFileSync(path.join(root,'codex-execution-compatibility.json'),'utf8'));
+ const runtime=req(path.join(adapterRoot,'codex-runtime.cjs')),wrongHost=runtime.hostMismatch(manifest,process);if(wrongHost)return JSON.stringify({installed:false,reason:wrongHost});
  const guard=config.binding?req(path.join(adapterRoot,'helper-binding.cjs')).createGuard(root,'codex',config.binding):null;
  const reused=guard?guard.replacement(globalThis.__codexExecutionBridge):globalThis.__codexExecutionBridge?.revision===manifest.helperRevision;
  if(reused&&globalThis.__codexExecutionBridge.server.listening)return JSON.stringify({installed:true,reused:true,pid:process.pid});
@@ -14,18 +15,12 @@ function install(root,config={}){
  async function manager(){
   if(globalThis.__codexExecutionManager?.hostId==='local'&&!globalThis.__codexExecutionManager.disposed)return globalThis.__codexExecutionManager;
   if(managerPromise)return managerPromise;
-  managerPromise=(async()=>{const session=new inspector.Session();session.connect();const post=(m,p)=>new Promise((r,j)=>session.post(m,p,(e,v)=>e?j(e):r(v)));
-   try{
-    const ctor=await req(path.join(adapterRoot,'codex-runtime.cjs')).connectionConstructor(manifest);globalThis.__codexExecutionPrototype=ctor.prototype;
-    const proto=await post('Runtime.evaluate',{expression:'globalThis.__codexExecutionPrototype'}),objects=await post('Runtime.queryObjects',{prototypeObjectId:proto.result.objectId});
-    await post('Runtime.callFunctionOn',{objectId:objects.objects.objectId,functionDeclaration:'function(){globalThis.__codexExecutionConnection=this.find(x=>x.options?.hostId==="local"&&!x.disposed&&x.connectionState==="connected");return true}',returnByValue:true});
-    const fn=await post('Runtime.evaluate',{expression:'globalThis.__codexExecutionConnection.options.getStatsigEvaluations'}),props=await post('Runtime.getProperties',{objectId:fn.result.objectId,ownProperties:false}),scopes=props.internalProperties.find(x=>x.name==='[[Scopes]]'),list=await post('Runtime.getProperties',{objectId:scopes.value.objectId,ownProperties:true});
-    for(const row of list.result){if(!row.value?.description?.startsWith('Closure'))continue;const vars=await post('Runtime.getProperties',{objectId:row.value.objectId,ownProperties:true}),entry=vars.result.find(x=>x.name===manifest.managerClass);if(!entry?.value?.objectId)continue;
-     await post('Runtime.callFunctionOn',{objectId:entry.value.objectId,functionDeclaration:'function(){globalThis.__codexExecutionPrototype=this.prototype;return true}',returnByValue:true});const p=await post('Runtime.evaluate',{expression:'globalThis.__codexExecutionPrototype'}),o=await post('Runtime.queryObjects',{prototypeObjectId:p.result.objectId});
-     await post('Runtime.callFunctionOn',{objectId:o.objects.objectId,functionDeclaration:'function(){globalThis.__codexExecutionManager=this.find(x=>x.hostId==="local"&&!x.disposed&&typeof x.startConversation==="function");return true}',returnByValue:true});
-    }
-    if(!globalThis.__codexExecutionManager)throw Error('Native local conversation manager unavailable');return globalThis.__codexExecutionManager;
-   }finally{session.disconnect();}
+  managerPromise=(async()=>{
+   const ctor=await runtime.connectionConstructor(manifest),connection=runtime.localConnection(await runtime.liveInstances(ctor))[0];
+   if(!connection)throw Error('Local desktop app-server connection is not ready');globalThis.__codexExecutionConnection=connection;
+   const managers=runtime.localManager(await runtime.liveInstances(await runtime.managerConstructor(manifest,connection)));
+   if(managers.length!==1)throw Error('Native local conversation manager unavailable');
+   globalThis.__codexExecutionManager=managers[0];return managers[0];
   })().finally(()=>managerPromise=null);return managerPromise;
  }
  const inputs=m=>({hasDesktopRuntime:true,hasLocalRuntime:true,hasDeveloperInstructions:true,isBrowserRuntime:false,usesDesktopMcp:m.settings.usesDesktopMcp,readDynamicTools:m.settings.readDynamicTools,sidebarSectionToolsEnabled:true,everydayWork:false});
@@ -73,7 +68,7 @@ function install(root,config={}){
  }
  const server=net.createServer(socket=>{let data='',handled=false;socket.setTimeout(90000,()=>socket.destroy());socket.on('error',()=>{});socket.on('data',async chunk=>{if(handled)return;data+=chunk.toString('utf8');if(data.length>1024*1024)return socket.destroy();const index=data.indexOf('\n');if(index<0)return;handled=true;
   const reply=value=>{if(!socket.destroyed)socket.end(JSON.stringify(value)+'\n');};try{const r=JSON.parse(data.slice(0,index));if(r.token!==token)return reply({error:'Unauthorized',status:401});
-   if(r.method==='status')return reply({pid:process.pid,binding:api.binding,desktopVersion:app.getVersion(),desktopPackageVersion:manifest.version,revision:api.revision,ready:!!await manager(),policyFile:policy.settingsFile()});
+   if(r.method==='status')return reply({pid:process.pid,binding:api.binding,desktopVersion:runtime.desktopVersion(manifest,req,process),desktopPackageVersion:manifest.version,revision:api.revision,ready:!!await manager(),policyFile:policy.settingsFile()});
    guard?.check(r,{probe:r.method==='maintenance'});
    if(r.method==='maintenance'){const m=await manager(),loaded=await req(path.join(adapterRoot,'helper-binding.cjs')).loadedThreadIds(globalThis.__codexExecutionConnection);for(const id of loaded){const thread=(await m.readThread(id,{includeTurns:false})).thread;if(thread?.status?.type!=='idle'||m.getThreadExecutionState(id)?.inProgress||m.getConversation(id)?.requests?.length)return reply({authoritative:true,idle:false,binding:api.binding});}return reply({authoritative:true,idle:api.busy===0,binding:api.binding});}
    if(r.method==='read')return reply(await snapshot(r.threadId));if(r.method==='create'){api.busy++;try{const operation=creationTail.then(()=>create(r.args));creationTail=operation.catch(()=>{});return reply(await operation);}finally{api.busy--;}}

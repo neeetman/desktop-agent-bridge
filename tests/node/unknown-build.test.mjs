@@ -48,6 +48,36 @@ test("renamed classes, module numbers and chunk paths are extracted without exec
     /0 matches/,
   );
 });
+test("Codex 26.1117 layout: connection and inherited-listener manager are found in the app server host bundle", () => {
+  const host = ".vite/build/app-server-host.js",
+    main = ".vite/build/early-bootstrap-916-x.js";
+  const hosted =
+    "exports.modules={19229(e,t,r){class aP{sendAppServerRequest(){} registerInternalNotificationHandler(){} readThread(){}}},13994(e,t,r){class cR{addConversationStateCallback(){} addApprovalRequestListener(){}}class ul{getConversation(){} startConversation(){} resumeConversation(){} getThreadExecutionState(){} updateThreadSettingsForNextTurn(){}}class _r extends cR{getConversation(){} getConversationOrThrow(){} startConversation(){} resumeConversation(){} getThreadExecutionState(){} updateThreadSettingsForNextTurn(){} readThread(){}}}}";
+  // Main keeps an unconstructed copy of the manager and a proxy whose members are fields.
+  const mainSource =
+    "exports.modules={89694(e,t,r){class vq{addConversationStateCallback(){} addApprovalRequestListener(){}}class _Q extends vq{getConversation(){} getConversationOrThrow(){} startConversation(){} resumeConversation(){} getThreadExecutionState(){} updateThreadSettingsForNextTurn(){}}class RE{readThread=()=>{};async sendAppServerRequest(){}}}}";
+  assert.deepEqual(
+    locate("codex", [
+      [main, mainSource],
+      [host, hosted],
+    ]),
+    {
+      connectionModule: host,
+      connectionModuleId: 19229,
+      managerModuleId: 13994,
+      managerClass: "_r",
+      host: "app-server-host",
+    },
+  );
+  assert.throws(
+    () =>
+      locate("codex", [
+        [main, mainSource],
+        [host, hosted.replace("getConversationOrThrow", "getOther")],
+      ]),
+    /0 matches for manager/,
+  );
+});
 test("a previously unknown installed build becomes a quarantined candidate without entering the catalog", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "build-candidate-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

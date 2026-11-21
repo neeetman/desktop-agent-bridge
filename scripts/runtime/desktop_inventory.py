@@ -33,6 +33,38 @@ def desktop_rows(rows):
                         for parent in rows)]
 
 
+def app_server_host(main_pid, rows=None):
+    """PID of the Codex "App server host" utility process under one desktop main process.
+
+    Codex 26.1117+ forks app-server-host.js as an Electron utility process; that
+    process owns the app-server connection and the conversation manager, and is
+    the parent of `codex.exe app-server`. Exactly one must exist."""
+    rows = process_rows(('chatgpt.exe', 'codex.exe')) if rows is None else rows
+    main = next((row for row in rows if row['ProcessId'] == main_pid), None)
+    if main is None:
+        raise RuntimeError('Codex desktop process is not running')
+    servers = {row['ParentProcessId'] for row in rows
+               if row['Name'].lower() == 'codex.exe' and ' app-server' in (row.get('CommandLine') or '')}
+    hosts = [row['ProcessId'] for row in rows
+             if row['ParentProcessId'] == main_pid
+             and row['ExecutablePath'].lower() == main['ExecutablePath'].lower()
+             and ' --type=utility' in (row.get('CommandLine') or '')
+             and 'node.mojom.NodeService' in (row.get('CommandLine') or '')
+             and row['ProcessId'] in servers]
+    if len(hosts) != 1:
+        raise RuntimeError(f'Expected one Codex app server host process, found {len(hosts)}')
+    return hosts[0]
+
+
+def attach_pid(main_pid, host=None, rows=None):
+    """The process a helper is evaluated in: the desktop main process, or its app server host."""
+    if host is None:
+        return main_pid
+    if host != 'app-server-host':
+        raise RuntimeError('Unsupported helper host: ' + str(host))
+    return app_server_host(main_pid, rows)
+
+
 def command_line(handle):
     """Command line through ProcessCommandLineInformation (needs only limited query access).
 
@@ -147,7 +179,9 @@ def installed_packages():
 
 
 if __name__ == '__main__':
-    if sys.argv[1:2] == ['--workers']:
+    if sys.argv[1:2] == ['--app-server-host']:
+        print(json.dumps({'pid': app_server_host(int(sys.argv[2]))}))
+    elif sys.argv[1:2] == ['--workers']:
         print(json.dumps(process_rows(('node.exe',), set(map(int, sys.argv[2:])))))
     else:
         print(json.dumps({'processes': desktop_rows(process_rows()), 'installed': installed_packages()}))

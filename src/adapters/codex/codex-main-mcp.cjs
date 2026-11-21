@@ -1,38 +1,30 @@
 function install(root,configBinding={}) {
-  if (process.type !== 'browser') return JSON.stringify({ installed: false });
+  if (!process.mainModule) return JSON.stringify({ installed: false });
   const req = process.mainModule.require.bind(process.mainModule);
   if (!req('node:worker_threads').isMainThread) return JSON.stringify({ installed: false });
   const fs = req('node:fs'), path = req('node:path'), net = req('node:net'), crypto = req('node:crypto');
-  const { app } = req('electron');
   const adapterRoot=configBinding.adapterRoot??root,compatibility = configBinding.manifest??JSON.parse(fs.readFileSync(path.join(root, 'codex-mcp-compatibility.json'), 'utf8'));
+  const runtime = req(path.join(adapterRoot,'codex-runtime.cjs')), wrongHost = runtime.hostMismatch(compatibility, process);
+  if (wrongHost) return JSON.stringify({ installed: false, reason: wrongHost });
   const guard=configBinding.binding?req(path.join(adapterRoot,'helper-binding.cjs')).createGuard(root,'codex',configBinding.binding):null;
   if(guard?guard.replacement(globalThis.__codexBridgeMcp):globalThis.__codexBridgeMcp?.state?.helperRevision===compatibility.helperRevision)return JSON.stringify({installed:true,reused:true,pid:process.pid});
   if(globalThis.__codexBridgeMcp?.state?.refreshing)return JSON.stringify({installed:false,reason:'MCP reload is in progress'});
   if(globalThis.__codexBridgeMcp&&!globalThis.__codexBridgeMcp.dispose)throw Error('Existing legacy helper cannot be safely replaced in place');
   globalThis.__codexBridgeMcp?.dispose();
-  const runtime = req(path.join(adapterRoot,'codex-runtime.cjs'));
   const directory = path.join(root, 'runtime/codex-mcp'); fs.mkdirSync(directory, { recursive: true });
   const token = JSON.parse(fs.readFileSync(path.join(root, 'runtime/connection.json'), 'utf8')).token;
   const state = { pid: process.pid,binding:configBinding.binding, helperRevision:compatibility.helperRevision,desktopPackageVersion:compatibility.version,installedAt: new Date().toISOString(), state: 'finding_connection', reloads: 0 };
   const persist = () => fs.writeFileSync(path.join(directory, 'native-state.json'), JSON.stringify(state, null, 2));
   let connection, refreshing, lastFingerprint, debounce;
-  const config = path.join(process.env.CODEX_HOME || app.getPath('home') + '/.codex', 'config.toml');
+  const config = path.join(process.env.CODEX_HOME || runtime.homeDirectory(req, process) + '/.codex', 'config.toml');
   const fingerprint = () => crypto.createHash('sha256').update(fs.readFileSync(config)).digest('hex');
   async function findConnection() {
     const constructor=await runtime.connectionConstructor(compatibility);
     if (connection && !connection.disposed && connection.connectionState === 'connected') return connection;
-    const inspector = req('node:inspector'), session = new inspector.Session(); session.connect();
-    const post = (method, params) => new Promise((resolve, reject) => session.post(method, params, (error, result) => error ? reject(error) : resolve(result)));
-    try {
-      globalThis.__codexBridgeMcpPrototype = constructor.prototype;
-      const prototype = await post('Runtime.evaluate', { expression: 'globalThis.__codexBridgeMcpPrototype' });
-      const objects = await post('Runtime.queryObjects', { prototypeObjectId: prototype.result.objectId });
-      const found = await post('Runtime.callFunctionOn', { objectId: objects.objects.objectId, functionDeclaration: 'function(){const x=this.find(x=>x.options?.hostId==="local"&&!x.disposed&&x.connectionState==="connected");globalThis.__codexBridgeLocalConnection=x;return !!x}', returnByValue: true });
-      if (!found.result?.value) throw new Error('Local desktop app-server connection is not ready');
-      connection = globalThis.__codexBridgeLocalConnection;
-      delete globalThis.__codexBridgeMcpPrototype; delete globalThis.__codexBridgeLocalConnection;
-      state.state = 'connected'; persist(); return connection;
-    } finally { session.disconnect(); }
+    const found = runtime.localConnection(await runtime.liveInstances(constructor))[0];
+    if (!found) throw new Error('Local desktop app-server connection is not ready');
+    connection = found;
+    state.state = 'connected'; persist(); return connection;
   }
   async function reload(reason = 'requested') {
     if (refreshing) return refreshing;

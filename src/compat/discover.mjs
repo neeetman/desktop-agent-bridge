@@ -48,8 +48,22 @@ function* chunks(file) {
   }
 }
 
+// Codex 26.1117+ forks this bundle as an Electron utility process that owns the
+// app server connection and the conversation manager.
+const APP_SERVER_HOST_FILE = /^\.vite\/build\/app-server-host\.js$/;
+// The 26.1117 manager inherits its listener methods from a base class.
+const HOSTED_MANAGER = [
+  "getConversation",
+  "getConversationOrThrow",
+  "startConversation",
+  "resumeConversation",
+  "getThreadExecutionState",
+  "updateThreadSettingsForNextTurn",
+];
+
 export function locate(app, files) {
-  const hits = { connection: [], manager: [], session: [] };
+  const hits = { connection: [], manager: [], session: [] },
+    hosted = [];
   for (const [file, source] of files) {
     if (
       app === "claude"
@@ -110,6 +124,12 @@ export function locate(app, files) {
              ["getConversationOrThrow","addConversationCallback"].every(k=>methods.has(k)))
           )
             hits.manager.push(row);
+          if (
+            row.name &&
+            n.superClass &&
+            HOSTED_MANAGER.every((k) => methods.has(k))
+          )
+            hosted.push(row);
         },
       });
     }
@@ -127,12 +147,19 @@ export function locate(app, files) {
   if (app === "claude")
     return { sessionModule: one("session"), workerPidField: "cliPid" };
   const connection = one("connection"),
-    manager = one("manager");
+    host = APP_SERVER_HOST_FILE.test(connection.file) ? "app-server-host" : null;
+  // In the app server host the manager must live in the connection's own bundle.
+  if (host && !hits.manager.length)
+    hits.manager = hosted.filter((row) => row.file === connection.file);
+  const manager = one("manager");
+  if (host && manager.file !== connection.file)
+    throw Error("Manual analysis required: manager is outside the app server host");
   return {
     connectionModule: connection.file,
     connectionModuleId: connection.id,
     managerModuleId: manager.id,
     managerClass: manager.name,
+    ...(host ? { host } : {}),
   };
 }
 
@@ -195,7 +222,12 @@ export async function discover(
         connectionModule: contract.connectionModule,
         connectionModuleId: contract.connectionModuleId,
       });
-      if (kind === "execution") Object.assign(m, contract);
+      if (contract.host) m.host = contract.host;
+      else delete m.host;
+      if (kind === "execution") {
+        const { host, ...execution } = contract;
+        Object.assign(m, execution);
+      }
     }
   }
   p.evidence = {
