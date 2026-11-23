@@ -58,6 +58,7 @@ const reasonZh = (reason) => {
 const CODES = {
   CAPABILITY_UNSUPPORTED: "当前适配包没有验证这项能力",
   BUILD_UNSUPPORTED: "没有与正在运行的桌面字节匹配的已验证适配包",
+  CODEX_WINDOW_CLOSED: "Codex 窗口已关闭（只在托盘运行），读取会话暂停；投递消息时会自动打开窗口",
   IDENTITY_MISMATCH: "运行中的桌面与适配包身份不一致，桌面可能刚刚更新",
   CONTRACT_MISMATCH: "原生接口与适配包契约不符",
   REFRESH_DEFERRED_BUSY: "桌面正忙，附着推迟到空闲时",
@@ -238,6 +239,10 @@ function diagnose(id) {
   return { tone: "ok", label: "已附着", steps, issue: null };
 }
 function healthIssue(id, health, steps) {
+  if (health.status === "paused") return { tone: "idle", label: "窗口已关闭", steps, issue: {
+    tone: "idle", title: meta(id).name + " 窗口已关闭",
+    lines: [CODES[health.errorCode] ?? health.error ?? ""],
+    next: "打开 " + meta(id).name + " 窗口后即可读取会话；投递消息不受影响。" } };
   const bad = health.status === "unhealthy";
   return { tone: bad ? "bad" : "warn", label: bad ? "探测失败" : "健康降级", steps, issue: {
     tone: bad ? "bad" : "warn", title: (bad ? "健康探测已确认失败" : "最近一次健康探测失败") + (health.failedStep ? "：" + (STEP_NAMES[health.failedStep] ?? health.failedStep) : ""),

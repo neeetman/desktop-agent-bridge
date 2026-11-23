@@ -65,6 +65,34 @@ def attach_pid(main_pid, host=None, rows=None):
     return app_server_host(main_pid, rows)
 
 
+def visible_window(pid):
+    """Whether the process owns a visible, titled top-level window.
+
+    Codex answers its desktop chat tools only while its window exists; running
+    from the tray alone, tool calls are accepted but never complete."""
+    user = ctypes.WinDLL('user32', use_last_error=True)
+    found = []
+    proc = ctypes.WINFUNCTYPE(w.BOOL, w.HWND, w.LPARAM)
+    user.EnumWindows.argtypes = [proc, w.LPARAM]
+    user.GetWindowThreadProcessId.argtypes = [w.HWND, ctypes.POINTER(w.DWORD)]
+    user.IsWindowVisible.argtypes = [w.HWND]
+    user.GetWindowTextLengthW.argtypes = [w.HWND]
+    user.GetWindow.argtypes = [w.HWND, w.UINT]
+    user.GetWindow.restype = w.HWND
+
+    def check(hwnd, _):
+        owner = w.DWORD()
+        user.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        # A real top-level window: visible, titled, and not owned by another window.
+        if (owner.value == pid and user.IsWindowVisible(hwnd)
+                and user.GetWindowTextLengthW(hwnd) > 0 and not user.GetWindow(hwnd, 4)):
+            found.append(hwnd)
+            return False
+        return True
+    user.EnumWindows(proc(check), 0)
+    return bool(found)
+
+
 def command_line(handle):
     """Command line through ProcessCommandLineInformation (needs only limited query access).
 
@@ -179,7 +207,9 @@ def installed_packages():
 
 
 if __name__ == '__main__':
-    if sys.argv[1:2] == ['--app-server-host']:
+    if sys.argv[1:2] == ['--visible-window']:
+        print(json.dumps({'visible': visible_window(int(sys.argv[2]))}))
+    elif sys.argv[1:2] == ['--app-server-host']:
         print(json.dumps({'pid': app_server_host(int(sys.argv[2]))}))
     elif sys.argv[1:2] == ['--workers']:
         print(json.dumps(process_rows(('node.exe',), set(map(int, sys.argv[2:])))))

@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from desktop_inventory import app_server_host, attach_pid, cim_time, desktop_rows, process_rows, installed_packages
+from desktop_inventory import app_server_host, attach_pid, cim_time, desktop_rows, process_rows, installed_packages, visible_window
 
 
 class DesktopInventoryTests(unittest.TestCase):
@@ -59,6 +59,12 @@ class DesktopInventoryTests(unittest.TestCase):
             app_server_host(999, rows)
         with self.assertRaisesRegex(RuntimeError, 'Unsupported'):
             attach_pid(100, 'renderer', rows)
+
+    @unittest.skipUnless(os.name == 'nt', 'Win32 window enumeration')
+    def test_windowless_processes_have_no_visible_window(self):
+        # PID 4 is the System process; it never owns a top-level window.
+        self.assertFalse(visible_window(4))
+        self.assertFalse(visible_window(0x7FFFFFF0))
 
     def test_orphaned_helper_of_an_exited_desktop_is_not_a_second_desktop(self):
         with tempfile.TemporaryDirectory() as temporary:

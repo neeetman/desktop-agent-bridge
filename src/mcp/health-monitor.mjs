@@ -77,15 +77,18 @@ export class HealthMonitor {
     } catch (caught) { error = caught; }
     if (this.closed) return this.rows[app];
     const now = this.now(), checkedAt = new Date(now).toISOString(), ok = !error;
-    const consecutiveFailures = ok ? 0 : (previous.consecutiveFailures ?? 0) + 1;
-    const firstFailureAt = ok ? null : previous.firstFailureAt ?? checkedAt;
+    // A desktop paused by the user (Codex running from the tray, window closed) is a known
+    // state, not a fault: it neither counts toward the failure alert nor clears an earlier one.
+    const paused = error?.code === 'CODEX_WINDOW_CLOSED';
+    const consecutiveFailures = ok ? 0 : paused ? previous.consecutiveFailures ?? 0 : (previous.consecutiveFailures ?? 0) + 1;
+    const firstFailureAt = ok || (paused && !previous.firstFailureAt) ? null : previous.firstFailureAt ?? checkedAt;
     let confirmedOk = oldConfirmed;
     if (ok) confirmedOk = true;
-    else if (consecutiveFailures >= this.policy.failuresBeforeAlert && now - Date.parse(firstFailureAt) >= this.policy.minimumFailureMs) confirmedOk = false;
+    else if (!paused && consecutiveFailures >= this.policy.failuresBeforeAlert && now - Date.parse(firstFailureAt) >= this.policy.minimumFailureMs) confirmedOk = false;
     const failed = steps.find(step => !step.ok);
     const row = {
       app, ok, confirmedOk: confirmedOk ?? null,
-      status: ok ? 'healthy' : confirmedOk === false ? 'unhealthy' : 'degraded',
+      status: ok ? 'healthy' : paused ? 'paused' : confirmedOk === false ? 'unhealthy' : 'degraded',
       startedAt, checkedAt, elapsedMs: Math.round(performance.now() - started),
       lastSuccessAt: ok ? checkedAt : previous.lastSuccessAt ?? null,
       transport: service?.transport ?? previous.transport ?? null,
@@ -93,7 +96,9 @@ export class HealthMonitor {
       failedStep: failed?.step ?? null, errorCode: failed?.errorCode ?? null, error: error?.message ?? null,
       lastFailure: failed ? {...failed, checkedAt, consecutiveFailures} : previous.lastFailure ?? null,
       recoveredFailures: ok ? previous.consecutiveFailures ?? 0 : 0,
-      repair: ok ? null : confirmedOk === false
+      repair: ok ? null : paused
+        ? 'Codex is running from the tray with its window closed, so chat reads are paused. Open the Codex window; message delivery reopens it automatically.'
+        : confirmedOk === false
         ? 'Persistent probe failure. Inspect bridge_health steps and service logs; check compatibility after upgrades. Repair only when the affected work is idle.'
         : 'Transient or unconfirmed failure; wait for the next independent read-only probe. Do not restart desktops or replay tasks.',
     };
