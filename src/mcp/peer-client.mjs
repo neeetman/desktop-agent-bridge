@@ -29,14 +29,16 @@ async function ensureRouter() {
     // Windows PowerShell 5 may exit silently with DETACHED_PROCESS and no console.
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fileURLToPath(projectURL("start-peer.ps1"))], { stdio: ['ignore', output, errors], windowsHide: true });
     fs.closeSync(output); fs.closeSync(errors);
-    let launchError; child.on('error', error => { launchError = error; }); child.on('exit', code => { if (code) launchError = new Error(`Bridge startup exited ${code}; inspect runtime/router/mcp-startup.stderr.log`); }); child.unref();
+    // Every failure here happens before the request is sent, so retrying is always safe.
+    const unavailable = message => Object.assign(new Error(message + ' Nothing was sent; retry the same call shortly.'), { code: 'ROUTER_UNAVAILABLE', status: 503, dispatchNotStarted: true, dispatchStage: 'notStarted' });
+    let launchError; child.on('error', error => { launchError = unavailable('Bridge startup could not be launched: ' + error.message + '.'); }); child.on('exit', code => { if (code) launchError = unavailable(`The bridge router is not answering and its startup exited ${code} (see runtime/router/mcp-startup.stderr.log).`); }); child.unref();
     const deadline = Date.now() + 90000;
     while (Date.now() < deadline) {
       if (launchError) throw launchError;
       try { const connection = JSON.parse(fs.readFileSync(connectionFile)); const response = await fetch(connection.baseUrl + '/health', { headers: { Authorization: `Bearer ${connection.token}` }, signal: AbortSignal.timeout(1500) }); if (response.ok) return; } catch {}
       await new Promise(resolve => setTimeout(resolve, 300));
     }
-    throw new Error('Bridge startup not confirmed; inspect runtime service logs before retrying a mutation');
+    throw unavailable('The bridge router did not answer for 90 seconds.');
   })().finally(() => { starting = null; });
   await starting;
 }

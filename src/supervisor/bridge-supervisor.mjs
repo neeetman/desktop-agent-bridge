@@ -240,12 +240,17 @@ async function watchdog(){
   const state=read(path.join(DIRECTORY,'state.json'));let healthy=false;
   try{healthy=(await request(path.join(DIRECTORY,'connection.json'))).ok===true&&(state?.paused||Date.now()-(state?.lastTickAt??0)<60000);}catch{}
   if(healthy)return console.log('Supervisor healthy');
-  if(state?.pid){const rows=await snapshot();const row=rows.get(state.pid);if(matchesScript(row,sourcePath(ROOT,'bridge-supervisor.mjs'))){process.kill(state.pid);record('watchdog.terminated_stale_supervisor',{pid:state.pid});}}
+  if(state?.pid){
+    // A hung process query (WMI stalls under load) cannot confirm which process is the
+    // supervisor, so nothing is stopped or restarted this round; the next run retries.
+    let rows;try{rows=await snapshot();}catch(error){record('watchdog.snapshot_unavailable',{pid:state.pid,error:String(error.message??error).slice(0,300)});return console.log('Process snapshot unavailable; watchdog deferred');}
+    const row=rows.get(state.pid);if(matchesScript(row,sourcePath(ROOT,'bridge-supervisor.mjs'))){process.kill(state.pid);record('watchdog.terminated_stale_supervisor',{pid:state.pid});}
+  }
   await run(config.powershell,['-NoProfile','-NonInteractive','-Command',`Start-ScheduledTask -TaskName ${quote(config.taskName)}`],{windowsHide:true,timeout:10000,env:environment});
   record('watchdog.restarted_supervisor',{});
 }
 
-if(process.argv.includes('--watchdog')){await watchdog();}
+if(process.argv.includes('--watchdog')){try{await watchdog();}catch(error){record('watchdog.failed',{error:String(error.message??error).slice(0,300)});console.error('Watchdog failed:',error.message??error);process.exitCode=1;}}
 else{
   const supervisor=new Supervisor();
   const server=http.createServer(async(req,res)=>{
