@@ -185,8 +185,8 @@ function diagnose(id) {
   if (!matched) {
     const code = row?.code ?? "BUILD_UNSUPPORTED";
     return { tone: "bad", label: "未知构建", steps, issue: {
-      tone: "bad", title: "未知构建：版本 " + version(row) + " 没有可用的适配包",
-      lines: [CODES[code] ?? row?.error ?? code, "<code>" + esc(code) + "</code>" + (row?.error ? " " + esc(row.error) : "")],
+      tone: "bad", title: "未知构建：版本 " + version(row) + " 没有可用的适配包", raw: true,
+      lines: [esc(CODES[code] ?? row?.error ?? code), "<code>" + esc(code) + "</code>" + (row?.error ? " " + esc(row.error) : "")],
       next: "在「适配」页检查 GitHub 上的适配包，或运行验收生成新适配包。",
       actions: [goCertify, { label: "检查 GitHub", kind: "upstream" }] } };
   }
