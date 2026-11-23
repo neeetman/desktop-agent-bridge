@@ -11,6 +11,7 @@ import {registeredLocation} from '../../core/worktree-location.mjs';
 import {ensureExecution,executionRpc} from './codex-execution.mjs';
 import {withCapability,compatError} from '../../compat/compatibility.mjs';
 import {checkExecutionOperation} from '../../compat/capability-checks.mjs';
+import {ensureWindow} from './codex-window.mjs';
 
 const run = promisify(execFile);
 export const MAX_FRAME = 8 * 1024 * 1024;
@@ -124,13 +125,14 @@ export function unwrapTool(result) {
 }
 
 export class DesktopTools {
-  constructor(pipe, callerThread, {executionRuntime,guardRuntime=withCapability} = {}) {
+  constructor(pipe, callerThread, {executionRuntime,guardRuntime=withCapability,windowGuard=ensureWindow} = {}) {
     if (!callerThread) throw new Error('Set --caller-thread or CODEX_THREAD_ID to the dispatcher chat ID');
     this.rpc = new PipeRpc(pipe);
     if (!pipe) this.rpc.resolvePath = discoverToolPipe;
     this.callerThread = callerThread;
     this.executionRuntime = executionRuntime ?? {ensureExecution,executionRpc};
     this.guardRuntime=guardRuntime;
+    this.windowGuard=windowGuard;
   }
   async listTools() { return this.guardRuntime('codex','read',async()=>{const value=await this.rpc.request('tools/list', { threadStartKind: 'all' });if(!Array.isArray(value.tools))throw compatError('CONTRACT_MISMATCH','Native tools/list contract changed');return value.tools;}); }
   async listModels(){const tool=(await this.listTools()).find(item=>item.name==='create_thread');return codexModelCatalog(tool?.inputSchema?.properties?.model?.description??'');}
@@ -211,6 +213,8 @@ export class DesktopTools {
     if(tool==='create_thread' && (selection.profile?.coreApiVersion===2||selection.profile?.evidence?.stage==='messaging-verified'))throw compatError('CAPABILITY_UNSUPPORTED','Generated profiles require validated managed creation');
     if(this.nativeGeneration&&this.nativeGeneration!==selection.binding?.generation){this.rpc.close();this.settingsRpc?.close();this.nativeSchema=null;}
     this.nativeGeneration=selection.binding?.generation;
+    // Codex completes chat tools only while its window is open: reads fail fast, sends reopen it.
+    await this.windowGuard(selection.runningBuild,{reopen:capability==='send'});
     if(capability==='send'&&this.nativeSchema!==selection.binding?.activationEpoch){const declaration=await this.rpc.request('tools/list',{threadStartKind:'all'});if(!Array.isArray(declaration.tools)||!declaration.tools.some(item=>item.name===tool&&item.inputSchema?.type==='object'))throw compatError('CONTRACT_MISMATCH','Native write-tool schema is unavailable');this.nativeSchema=selection.binding?.activationEpoch;}
     const result = await this.rpc.request('tools/call', {
       callerSource: 'codex', namespace: 'codex_app', hostId: 'local',

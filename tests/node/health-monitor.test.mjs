@@ -101,3 +101,19 @@ test('closing cancels a probe without saving a false failure or leaking a long t
   await pending;
   assert.equal(f.monitor.rows.codex, undefined); assert.deepEqual(f.transitions, []);
 });
+
+test('a closed Codex window is a paused state: no failure count, no alert, clear repair', async () => {
+  let closed = true;
+  const f = fixture({request: async (app, route) => {
+    if (route !== '/health' && closed) throw Object.assign(new Error('Codex is running without its window'), {code: 'CODEX_WINDOW_CLOSED', status: 503});
+    return {ok: true, transport: app};
+  }});
+  try {
+    for (let n = 0; n < 5; n++) { await f.monitor.probe('codex'); f.advance(70000); }
+    const row = f.monitor.rows.codex;
+    assert.equal(row.status, 'paused'); assert.equal(row.consecutiveFailures, 0); assert.equal(row.errorCode, 'CODEX_WINDOW_CLOSED');
+    assert.match(row.repair, /window/); assert.deepEqual(f.transitions, []);
+    closed = false; await f.monitor.probe('codex');
+    assert.equal(f.monitor.rows.codex.status, 'healthy'); assert.deepEqual(f.transitions, []);
+  } finally { f.monitor.close(); }
+});
