@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, clipboard, nativeTheme, Notification } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { tmpdir } = require("node:os");
@@ -168,21 +168,47 @@ async function checkUnknown() {
   try {
     const prefs=await watchSettings();
     if(!prefs.enabled)return;
-    const {unknownPair}=await compatModule("canary-watch.mjs");
-    const pair=unknownPair((await cli("doctor")).apps);
-    if(!pair||prefs.attempts[pair.key])return;
-    updating.label="自动验收未知构建（最长约 17 分钟）";
+    const {watchUnknownBuilds}=await compatModule("update-watch.mjs");
     const {atomicJson}=await compatModule("compatibility.mjs");
-    const attempt={at:new Date().toISOString(),status:"验收中"};
-    prefs.attempts[pair.key]=attempt;prefs.latest=pair.key;
-    // Persist before the first native dispatch, including across console restarts.
-    atomicJson(watchFile,prefs);
-    try {
-      const result=await runCertification(pair.unknown[0],await config());
-      attempt.status="验收通过，等待导入";attempt.packages=result.packages;
-    } catch(e){attempt.status="需要检查";attempt.error=e.message;}
-    atomicJson(watchFile,prefs);
+    const cfg=await config();
+    await watchUnknownBuilds(prefs,{
+      doctor:()=>cli("doctor"),
+      certify:app=>{updating.label="自动验收未知构建（最长约 17 分钟）";return runCertification(app,cfg);},
+      importPackage:folder=>cli("compat","import",folder),
+      activate:(app,profileId)=>cli("compat","activate","--app",app,"--profile",profileId,"--when-idle"),
+      notify,save:value=>atomicJson(watchFile,value),now:Date.now,
+    });
   } finally {updating=null;}
+}
+function notify(title,body){
+  logLine("Notification:",title,body);
+  try{if(Notification.isSupported())new Notification({title:"桌面桥接："+title,body}).show();}catch(e){logLine("Notification failed:",e.message);}
+}
+const stalledFile=path.join(root,"runtime/candidates/stalled-alerts.json");
+async function checkStalled() {
+  const {stalledDeliveries}=await compatModule("update-watch.mjs");
+  const {readJson,atomicJson}=await compatModule("compatibility.mjs");
+  const queue=await local("runtime/router/connection.json","/v1/queue");
+  const alerts=readJson(stalledFile,{});
+  const {changed}=stalledDeliveries(queue.messages??[],alerts,{notify,now:Date.now});
+  if(changed)atomicJson(stalledFile,alerts);
+}
+const deepseekFile=path.join(root,"runtime/candidates/deepseek-selftest.json");
+async function checkDeepseek() {
+  const {deepseekSelfTest}=await compatModule("update-watch.mjs");
+  const {readJson,atomicJson}=await compatModule("compatibility.mjs");
+  const native=path.join(root,"runtime/deepseek-native");
+  const state=readJson(deepseekFile,{});
+  const result=await deepseekSelfTest(state,{
+    imported:()=>readJson(path.join(native,"imported.json"),null),
+    rpc:async(method,args)=>{
+      const c=readJson(path.join(native,"connection.json"));
+      const response=await fetch(c.baseUrl+"/rpc",{method:"POST",headers:{Authorization:"Bearer "+c.token,"Content-Type":"application/json"},body:JSON.stringify({method,args}),signal:AbortSignal.timeout(20000)});
+      const value=await response.json();if(!response.ok)throw Error(value.error??("HTTP "+response.status));return value.result;
+    },
+    notify,now:Date.now,
+  });
+  if(["passed","failed"].includes(result.action))atomicJson(deepseekFile,state);
 }
 async function confirm(title, detail) {
   const result = await dialog.showMessageBox(window, {
@@ -414,7 +440,11 @@ if (!app.requestSingleInstanceLock()) {
       }
       return prefs;
     });
-    const watchTick=()=>checkUnknown().catch(e=>logLine("Automatic compatibility check:",e.message));
+    const watchTick=()=>{
+      checkUnknown().catch(e=>logLine("Automatic compatibility check:",e.message));
+      checkDeepseek().catch(e=>logLine("DeepSeek self-test:",e.message));
+      checkStalled().catch(e=>logLine("Stalled delivery check:",e.message));
+    };
     setInterval(watchTick,60000).unref();
     void watchTick();
     bind("copy", (value) => {

@@ -191,7 +191,8 @@ export class PeerRouter {
     return {id:message.id, callerId:message.callerId ?? null, kind:message.kind, from:message.from, to:message.to,
       stage, jobStatus:job.status, createdAt:message.createdAt, deliveredAt:message.deliveredAt ?? null,
       acknowledgedAt:message.consumption?.acknowledgedAt ?? null, replyId:message.replyMessageId ?? null,
-      reason:job.error ?? job.lastError ?? job.blockedByUpdate ?? job.skippedReason ?? null};
+      reason:job.error ?? job.lastError ?? job.blockedByUpdate ?? job.skippedReason ?? null,
+      ...(job.faultSince?{faultSince:job.faultSince,faultCount:job.faultCount,faultCode:job.lastErrorCode??null}:{})};
   }
   async reply(input) {
     const key=text(input.messageId,'messageId'),previous=this.replyLocks.get(key)??Promise.resolve();
@@ -346,8 +347,8 @@ export class PeerRouter {
           job.status = message.status = error.code === 'CACHED_TASK_FAILURE' ? 'failed' : 'unknown';
           job.error = error.message; this.save(); return;
         }
-        if (error.status === 409) { job.status = 'queued';job.lastError=error.message;job.lastErrorCode=error.code; this.save(); return; }
-        if(error.status===503&&error.dispatchNotStarted){job.status='queued';job.blockedByUpdate=error.code;job.lastError=error.message;job.lastErrorCode=error.code;this.save();return;}
+        if (error.status === 409) { job.status = 'queued';job.lastError=error.message;job.lastErrorCode=error.code;delete job.faultSince; this.save(); return; }
+        if(error.status===503&&error.dispatchNotStarted){job.status='queued';delete job.faultSince;job.blockedByUpdate=error.code;job.lastError=error.message;job.lastErrorCode=error.code;this.save();return;}
         job.status = message.status = 'unknown'; job.error = error.message;
         if (!job.resumeDecisionId) job.needsLookup = true;
         this.save(); return;
@@ -358,7 +359,7 @@ export class PeerRouter {
       job.taskId = task.id;job.status = ['unknown', 'failed'].includes(task.status) ? task.status : 'delivered';
       if(!message.replyMessageId)message.status=message.consumption?.acknowledgedAt?'consumed':job.status;
       if(job.status==='delivered')message.deliveredAt = new Date().toISOString();this.save();
-      delete job.lastError;delete job.lastErrorCode;delete job.blockedByUpdate;this.save();
+      delete job.lastError;delete job.lastErrorCode;delete job.blockedByUpdate;delete job.faultSince;delete job.faultCount;this.save();
     }
     if (job.status !== 'delivered') return;
     const task = await this.backendRequest(message.to.app, `/v1/tasks/${job.taskId}`);
@@ -398,7 +399,12 @@ export class PeerRouter {
         if (this.busy.has(key)) return;
         this.busy.add(key);
         try { await this.processJob(job); }
-        catch (error) { job.lastError = error.message;job.lastErrorCode=error.code;if(error.status===503)job.blockedByUpdate=error.code; this.save(); }
+        catch (error) {
+          // Unexpected failures outside the dispatch handlers (sender validation, reads) are
+          // retried every tick; remember when this exact error started so it can be reported.
+          if(job.lastError!==error.message||!job.faultSince){job.faultSince=new Date().toISOString();job.faultCount=0;}
+          job.faultCount=(job.faultCount??0)+1;
+          job.lastError = error.message;job.lastErrorCode=error.code;if(error.status===503)job.blockedByUpdate=error.code; this.save(); }
         finally { this.busy.delete(key); }
       }));
   }
