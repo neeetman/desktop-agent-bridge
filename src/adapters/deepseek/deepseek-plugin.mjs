@@ -22,9 +22,18 @@ export async function apply(ctx, config) {
   const methods = {
     list: () => ctx.sessionController.list({}),
     inspect: async ({ sessionId }) => {
-      const result = await ctx.sessionController.inspect(sessionId, signal());
-      const projections = await ctx.sessionController.projections({ sessionId }, signal());
-      return { meta: result.meta, events: result.events.slice(-400), projections, hasMore: result.events.length > 400, status: ctx.agents.get(sessionId)?.status ?? 'idle' };
+      const controller = ctx.sessionController;
+      const projections = await controller.projections({ sessionId }, signal());
+      if (typeof controller.inspect === 'function') {
+        const result = await controller.inspect(sessionId, signal());
+        return { meta: result.meta, events: result.events.slice(-400), projections, hasMore: result.events.length > 400, status: ctx.agents.get(sessionId)?.status ?? 'idle' };
+      }
+      // Harness 0.2.2 replaced inspect with a paged events read and a separate state read.
+      const page = await controller.events({ address: { kind: 'session', sessionId }, maxMessages: 200 }, signal());
+      const events = page.records.filter(record => record.type === 'event').map(record => record.event);
+      const state = await controller.state({ sessionId }, signal());
+      const summary = (await controller.list({}, signal())).items.find(item => item.sessionId === sessionId);
+      return { meta: { cwd: summary?.cwd }, events, projections, hasMore: page.hasMore, status: state.running ? 'running' : 'idle' };
     },
     workspaces: () => ({ items: ctx.workspaceRegistry.list().map(w => ({ id: w.id, title: w.title, path: w.path, sessionIds: w.sessionIds })) }),
     createWorkspace: async ({ path: directoryPath, title }) => {
