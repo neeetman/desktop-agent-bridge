@@ -20,7 +20,7 @@ def attach(data):
             if hashlib.file_digest(stream, 'sha256').hexdigest() != build['hashes'][key]:
                 raise ValueError('Desktop fingerprint changed')
     rows = [row for row in desktop_rows(process_rows()) if row['app'] == app]
-    if len(rows) != 1 or any(rows[0][k] != build[k] for k in ('pid', 'createdAt', 'executable')):
+    if len(rows) != 1 or rows[0].get('accessDenied') or any(rows[0][k] != build[k] for k in ('pid', 'createdAt', 'executable')):
         raise ValueError('Desktop process generation changed')
     source = (Path(data['adapterRoot']) / 'claude-attach-agent.js').read_text(encoding='utf8')
     if app == 'codex':

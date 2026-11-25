@@ -70,6 +70,12 @@ def monitor(app, launch=None):
                     outcome.clear()
                 if worker and worker.is_alive():
                     state.update(state='attaching')
+                elif 'unable to find DLL' in (outcome.get('error') or ''):
+                    # Windows Temp cleanup removed the cached agent DLL of a long-lived
+                    # monitor; exit so the supervisor starts a fresh process.
+                    state.update(state='restarting', error=outcome.get('error'))
+                    write(status_file, {'processes': [state], **state} if app == 'claude' else state)
+                    raise SystemExit(1)
                 elif outcome.get('key') == previous_key and outcome.get('code') in ['IDENTITY_MISMATCH', 'CONTRACT_MISMATCH', 'REFRESH_DEFERRED_BUSY', 'HOST_INJECTION_UNAVAILABLE']:
                     state.update(state='incompatible', code=outcome['code'], error=outcome.get('error'))
                     if time.monotonic() >= retry_at:

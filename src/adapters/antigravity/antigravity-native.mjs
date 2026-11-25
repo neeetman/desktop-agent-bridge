@@ -340,6 +340,15 @@ export class AntigravityTools {
   transport = 'antigravity-language-server-agentapi';
   callerThread = 'antigravity-desktop-agentapi';
   effortValues = [];
+  executionCapabilities() {
+    return {
+      executionFields: ['title', 'model', 'taskVersion'],
+      effortAliases: {},
+      cwdPolicy: 'projectless-only',
+      projectSelection: 'unsupported; agentapi new-conversation creates projectless chats only (pass absolute workspace paths in prompt)',
+      reasoningSelection: 'model-tier-only; omit effort and pass flash_lite, flash, pro or a model ID',
+    };
+  }
   constructor(options = {}) {
     this.native = options.native ?? new AntigravityNative(options);
     this.spillDirectory = options.spillDirectory ?? null;

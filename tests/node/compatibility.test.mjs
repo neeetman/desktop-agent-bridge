@@ -58,6 +58,33 @@ test('doctor names corrupt state without exposing its contents or rewriting it',
   assert.deepEqual(fs.readFileSync(f.manager.file),damaged);
  } finally { f.close(); }
 });
+test('accessDenied process row blocks only that app with PROCESS_SNAPSHOT_UNAVAILABLE rather than DESKTOP_NOT_RUNNING',async()=>{
+ const f=fixture();try{
+  f.setInventory({processes:[{app:'codex',pid:101,createdAt:null,executable:null,accessDenied:true}],installed:[]});
+  const doc=await f.manager.doctor('codex');
+  assert.equal(doc.apps.codex.code,'PROCESS_SNAPSHOT_UNAVAILABLE');
+  await assert.rejects(f.manager.resolve('codex','read'),{code:'PROCESS_SNAPSHOT_UNAVAILABLE'});
+ }finally{f.close();}
+});
+test('activate after desktop upgrade uses the new generation in binding rather than the previous blocked generation',async()=>{
+ const f=fixture();try{
+  await f.manager.resolve('codex','read');
+  fs.writeFileSync(path.join(f.appdir,'resources/app.asar'),'asar-v2');
+  f.setInventory({processes:[{app:'codex',pid:202,createdAt:'second',executable:path.join(f.appdir,'app.exe')}],installed:[]});
+  await assert.rejects(f.manager.resolve('codex','read'),{code:'BUILD_UNSUPPORTED'});
+  const hashesV2={executableSha256:sha('exe'),chromeSha256:sha('chrome'),asarSha256:sha('asar-v2')};
+  const pkg=path.join(f.base,'pkg-v2');fs.mkdirSync(path.join(pkg,'adapter'),{recursive:true});
+  fs.copyFileSync(sourcePath(f.root,'adapter.cjs'),path.join(pkg,'adapter/adapter.cjs'));
+  atomicJson(path.join(pkg,'profile.json'),{...f.profile,id:'test-v2',packageVersion:'2.0.0',hashes:hashesV2,manifests:{execution:{...hashesV2},mcp:{...hashesV2}}});
+  await f.manager.importPackage(pkg);
+  const res=await f.manager.activate('codex','test-v2',{
+   idleProbe:async()=>({authoritative:true,idle:true}),
+   attachProbe:async sel=>{assert.equal(sel.binding.generation,sel.generation);return {ready:true,binding:sel.binding};},
+  });
+  assert.equal(res.activated,true);
+  assert.equal(f.manager.state().apps.codex.binding.generation,f.manager.state().apps.codex.generation);
+ }finally{f.close();}
+});
 test('doctor does not report a previous process as attached', async () => {
  const f=fixture();
  try {
