@@ -45,7 +45,7 @@ app.setPath(
 async function read(file) {
   return JSON.parse(await fs.readFile(path.join(root, file), "utf8"));
 }
-async function local(file, route) {
+async function local(file, route, timeoutMs = 5000) {
   const c = await read(file);
   const base = new URL(c.baseUrl);
   if (base.protocol !== "http:" || base.hostname !== "127.0.0.1")
@@ -53,7 +53,7 @@ async function local(file, route) {
   const res = await fetch(new URL(route, base), {
     headers: { Authorization: "Bearer " + c.token },
     redirect: "error",
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw Error("HTTP " + res.status);
   return res.json();
@@ -87,7 +87,7 @@ async function cli(...args) {
   );
 }
 async function queueWithReviews() {
-      const queue = await local("runtime/router/connection.json", "/v1/queue");
+      const queue = await local("runtime/router/connection.json", "/v1/queue", 20000);
       const reviews = await read("runtime/console-reviews.json").catch(error => {
         if (error.code === "ENOENT") return {};
         throw error;
@@ -188,7 +188,7 @@ const stalledFile=path.join(root,"runtime/candidates/stalled-alerts.json");
 async function checkStalled() {
   const {stalledDeliveries}=await compatModule("update-watch.mjs");
   const {readJson,atomicJson}=await compatModule("compatibility.mjs");
-  const queue=await local("runtime/router/connection.json","/v1/queue");
+  const queue=await local("runtime/router/connection.json","/v1/queue",20000);
   const alerts=readJson(stalledFile,{});
   const {changed}=stalledDeliveries(queue.messages??[],alerts,{notify,now:Date.now});
   if(changed)atomicJson(stalledFile,alerts);

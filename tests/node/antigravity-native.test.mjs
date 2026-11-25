@@ -205,6 +205,15 @@ test('Antigravity tools read the index read-only, gate writes on a live hub and 
     assert.equal(indexed.thread.status.type, 'active');
     await assert.rejects(fresh.call('read_thread', {threadId: '66666666-2222-3333-4444-555555555555'}), {status: 404});
     assert.deepEqual((await tools.listModels()).models.map(model => model.id), ['flash_lite', 'flash', 'pro']);
+    const {startBridge} = await import('../../src/core/bridge.mjs');
+    const srv = await startBridge({tools, stateDir: path.join(home, 'bridge-state'), port: 0, pollMs: 1e9, enableIpc: false});
+    try {
+      const conn = JSON.parse(fs.readFileSync(path.join(home, 'bridge-state', 'connection.json'), 'utf8'));
+      const caps = await (await fetch(`${conn.baseUrl}/v1/capabilities`, {headers: {Authorization: `Bearer ${conn.token}`}})).json();
+      assert.equal(caps.cwdPolicy, 'projectless-only');
+      assert.deepEqual(caps.executionFields, ['title', 'model', 'taskVersion']);
+      assert.deepEqual(caps.effortValues, []);
+    } finally { await srv.close(); }
   } finally { fs.rmSync(home, {recursive: true, force: true}); }
 });
 

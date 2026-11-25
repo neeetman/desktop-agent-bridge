@@ -22,6 +22,8 @@ function harness({certify, activate, appsValue} = {}) {
 
 test('classify separates layout changes from things a person can clear', () => {
   assert.equal(classify('Manual analysis required: found 0 matches for manager').kind, 'structural');
+  assert.equal(classify('PermissionError: [WinError 5] 拒绝访问。').kind, 'permission');
+  assert.equal(classify('Cannot inspect codex desktop process (access denied)').kind, 'permission');
   assert.equal(classify('codex native callback timed out: no Node-API callback').kind, 'user');
   assert.equal(classify('Claude test chat unavailable or archived').kind, 'user');
   assert.equal(classify('something odd').kind, 'unknown');
@@ -54,13 +56,22 @@ test('a missed Codex click is retried after the backoff and then gives up', asyn
   assert.equal(log.certified.length, WATCH_POLICY.maxAttempts);
 });
 
-test('a structural failure is never retried; activation failure stops without recovery', async () => {
+test('a structural or permission failure is never retried; activation failure stops without recovery', async () => {
   const s = harness({certify: () => { throw Error('Manual analysis required: found 0 matches for manager'); }});
   const prefs = {attempts: {}};
   await watchUnknownBuilds(prefs, s.deps);
   s.advance(WATCH_POLICY.retryAfterMs * 10);
   assert.equal((await watchUnknownBuilds(prefs, s.deps)).action, 'skip');
   assert.match(s.log.notes.at(-1), /修改适配代码/);
+
+  const p = harness({certify: () => { throw Error('PermissionError: [WinError 5] 拒绝访问。'); }});
+  const pPerm = {attempts: {}};
+  await watchUnknownBuilds(pPerm, p.deps);
+  p.advance(WATCH_POLICY.retryAfterMs * 10);
+  assert.equal((await watchUnknownBuilds(pPerm, p.deps)).action, 'skip');
+  assert.equal(p.log.certified.length, 1);
+  assert.match(p.log.notes.at(-1), /WinError 5/);
+  assert.doesNotMatch(p.log.notes.at(-1), /分钟后重试/);
 
   const a = harness({activate: () => { throw Error('ATTACHMENT_ERROR'); }});
   const p2 = {attempts: {}};

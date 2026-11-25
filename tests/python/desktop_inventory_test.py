@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from desktop_inventory import app_server_host, attach_pid, cim_time, desktop_rows, process_rows, installed_packages, visible_window
+from desktop_inventory import _inspect_candidate, app_server_host, attach_pid, cim_time, desktop_rows, process_rows, installed_packages, visible_window
 
 
 class DesktopInventoryTests(unittest.TestCase):
@@ -91,3 +91,77 @@ class DesktopInventoryTests(unittest.TestCase):
         for package in installed_packages():
             self.assertIn(package['app'], ['claude', 'codex'])
             self.assertTrue(Path(package['directory']).is_dir())
+
+    def test_access_denied_helper_is_ignored_when_main_is_known_but_root_candidate_surfaces(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / 'codex/resources').mkdir(parents=True)
+            (root / 'codex/resources/app.asar').touch()
+            exe = str(root / 'codex/ChatGPT.exe')
+            main = {'Name': 'ChatGPT.exe', 'ProcessId': 100, 'ParentProcessId': 1,
+                    'ExecutablePath': exe, 'Created': 't0', 'CommandLine': '"' + exe + '"'}
+            denied_child = {'Name': 'ChatGPT.exe', 'ProcessId': 101, 'ParentProcessId': 100,
+                            'ExecutablePath': None, 'Created': None, 'CommandLine': None, 'accessDenied': True}
+            denied_grandchild = {'Name': 'ChatGPT.exe', 'ProcessId': 102, 'ParentProcessId': 101,
+                                 'ExecutablePath': None, 'Created': None, 'CommandLine': None, 'accessDenied': True}
+            # Inaccessible helpers under an accessible desktop main process do not fail or duplicate it.
+            self.assertEqual([row['pid'] for row in desktop_rows([main, denied_child, denied_grandchild])], [100])
+            # A root inaccessible desktop candidate must still surface so it is not treated as absent.
+            denied_root = {'Name': 'Claude.exe', 'ProcessId': 200, 'ParentProcessId': 50,
+                           'ExecutablePath': None, 'Created': None, 'CommandLine': None, 'accessDenied': True}
+            denied_root_child = {'Name': 'Claude.exe', 'ProcessId': 201, 'ParentProcessId': 200,
+                                 'ExecutablePath': None, 'Created': None, 'CommandLine': None, 'accessDenied': True}
+            rows = desktop_rows([main, denied_child, denied_root, denied_root_child])
+            self.assertEqual(rows, [
+                {'app': 'codex', 'pid': 100, 'createdAt': 't0', 'executable': exe},
+                {'app': 'claude', 'pid': 200, 'createdAt': None, 'executable': None, 'accessDenied': True},
+            ])
+
+    def test_inspect_candidate_handles_winerror_5_and_exited_processes(self):
+        import ctypes
+        def make_kernel(*, open_err=None, query_err=None, exit_code=259):
+            last_error = [0]
+            closed = []
+            class FakeKernel:
+                def ProcessIdToSessionId(self, pid, out_ptr):
+                    ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_ulong))[0] = 1
+                    return 1
+                def OpenProcess(self, access, inherit, pid):
+                    if open_err is not None:
+                        last_error[0] = open_err
+                        return 0
+                    return 42
+                def QueryFullProcessImageNameW(self, handle, flags, buf, size_ptr):
+                    if query_err is not None:
+                        last_error[0] = query_err
+                        return 0
+                    return 1
+                def GetExitCodeProcess(self, handle, out_ptr):
+                    ctypes.cast(out_ptr, ctypes.POINTER(ctypes.c_ulong))[0] = exit_code
+                    return 1
+                def GetProcessTimes(self, handle, *ptrs):
+                    return 1
+                def CloseHandle(self, handle):
+                    closed.append(handle)
+                    return 1
+            return FakeKernel(), lambda: last_error[0], closed
+
+        # OpenProcess WinError 5 -> accessDenied row instead of raising PermissionError.
+        k, err_fn, closed = make_kernel(open_err=5)
+        self.assertEqual(
+            _inspect_candidate(10, 1, 'ChatGPT.exe', 1, k, err_fn, lambda h: None),
+            {'ProcessId': 10, 'ParentProcessId': 1, 'Name': 'ChatGPT.exe',
+             'ExecutablePath': None, 'Created': None, 'CommandLine': None, 'accessDenied': True},
+        )
+        # QueryFullProcessImageNameW WinError 5 on a still-active process -> accessDenied row and handle closed.
+        k, err_fn, closed = make_kernel(query_err=5, exit_code=259)
+        row = _inspect_candidate(11, 1, 'ChatGPT.exe', 1, k, err_fn, lambda h: None)
+        self.assertTrue(row['accessDenied'])
+        self.assertEqual(closed, [42])
+        # QueryFullProcessImageNameW WinError 5 on an already-exited process -> skipped as disappeared.
+        k, err_fn, closed = make_kernel(query_err=5, exit_code=0)
+        self.assertIsNone(_inspect_candidate(12, 1, 'ChatGPT.exe', 1, k, err_fn, lambda h: None))
+        self.assertEqual(closed, [42])
+        # OpenProcess WinError 87 -> skipped as disappeared.
+        k, err_fn, _ = make_kernel(open_err=87)
+        self.assertIsNone(_inspect_candidate(13, 1, 'ChatGPT.exe', 1, k, err_fn, lambda h: None))

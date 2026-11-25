@@ -113,7 +113,9 @@ export class Compatibility {
     return {files,stamp:canonical(Object.entries(files).map(([key,file])=>{const s=fs.statSync(file,{bigint:true});return [key,path.resolve(file),String(s.ino),String(s.size),String(s.mtimeNs),String(s.ctimeNs)];}))};
   }
   evaluate(app,inventory,state,requestedId){
-    const processes=inventory.processes.filter(row=>row.app===app);if(processes.length!==1)throw compatError(processes.length?'AMBIGUOUS_DESKTOP':'DESKTOP_NOT_RUNNING',`Exactly one ${app} desktop main process is required`);
+    const processes=inventory.processes.filter(row=>row.app===app);
+    if(processes.some(row=>row.accessDenied))throw compatError('PROCESS_SNAPSHOT_UNAVAILABLE',`Cannot inspect ${app} desktop process (access denied)`);
+    if(processes.length!==1)throw compatError(processes.length?'AMBIGUOUS_DESKTOP':'DESKTOP_NOT_RUNNING',`Exactly one ${app} desktop main process is required`);
     const processInfo=processes[0],generation=digest(canonical(processInfo));const old=state.apps[app]??{};
     const {files,stamp}=this.fileFingerprint(processInfo.executable,app);
     let hashes;
@@ -272,7 +274,10 @@ export class Compatibility {
       try {
         const rows = await readWin32Inventory(['--workers', ...candidates.map(row => String(row.pid))]);
         const byPid = new Map(rows.map(row => [row.ProcessId,row]));
-        for (const record of candidates) record.alive = verifyWorker(record, byPid.get(record.pid));
+        for (const record of candidates) {
+          const info = byPid.get(record.pid);
+          record.alive = info?.accessDenied ? null : verifyWorker(record, info);
+        }
       } catch {
         for (const record of candidates) record.alive = null;
       }
@@ -295,13 +300,13 @@ export class Compatibility {
       // The transition is recorded; lease files written before it are visible now.
       if(this.liveLeaseFiles(app).length)throw compatError('REFRESH_DEFERRED_BUSY','Native requests are still in flight');
       const idle=await idleProbe?.(transition.previous);if(!idle?.authoritative||!idle.idle)throw compatError('REFRESH_DEFERRED_BUSY','Native global idle/approval state is not confirmed');
-      const binding={...transition.previous.binding,activationEpoch:transition.previous.activationEpoch+1,profileDigest:transition.candidate.profileDigest,adapterDigest:transition.candidate.profile.adapterDigest};
+      const binding={...transition.previous.binding,generation:transition.generation,activationEpoch:transition.previous.activationEpoch+1,profileDigest:transition.candidate.profileDigest,adapterDigest:transition.candidate.profile.adapterDigest};
       await this.locked(()=>{const state=this.state(),current=state.apps[app].transition;if(current?.id!==transition.id||current.runner?.id!==runner.id||current.phase!=='waitingIdle')throw compatError('CONFIG_EPOCH_CHANGED','Activation ownership changed');current.phase='attaching';current.binding=binding;this.save(state,{app,event:'transition.attaching',id:transition.id});});
       const result=await attachProbe?.({...transition.candidate,app,binding});
       if(!result?.ready||canonical(result.binding)!==canonical(binding))throw compatError('CONTRACT_MISMATCH','Candidate helper probe did not confirm binding/readiness');
       await this.locked(async()=>{const state=this.state(),current=state.apps[app];if(current.transition?.id!==transition.id)throw compatError('CONFIG_EPOCH_CHANGED','Transition changed concurrently');const checked=this.pin(this.evaluate(app,await this.inventory(),state,profileId));if(checked.generation!==transition.generation||checked.profileDigest!==transition.candidate.profileDigest)throw compatError('CONFIG_EPOCH_CHANGED','Desktop/profile changed during activation');state.apps[app]={...transition.previous,...checked,profileId,previousProfileId:transition.from,binding,activationEpoch:binding.activationEpoch,phase:'ready',circuits:{},transition:null};this.save(state,{app,event:'transition.committed',id:transition.id});});
       return {activated:true,profileId,binding};
-    }catch(error){await this.locked(()=>{const state=this.state();const row=state.apps[app];if(row?.transition?.id===transition.id&&row.transition.runner?.id===runner.id){row.transition.phase=row.transition.phase==='attaching'?'recoveryRequired':'waitingIdle';delete row.transition.runner;row.transition.error=error.code??'ATTACHMENT_ERROR';this.save(state,{app,event:'transition.deferred',id:transition.id,code:error.code});}});throw error;}
+    }catch(error){await this.locked(()=>{const state=this.state();const row=state.apps[app];if(row?.transition?.id===transition.id&&row.transition.runner?.id===runner.id){row.transition.phase=row.transition.phase==='attaching'&&!error.beforeInstall?'recoveryRequired':'waitingIdle';delete row.transition.runner;row.transition.error=error.code??'ATTACHMENT_ERROR';this.save(state,{app,event:'transition.deferred',id:transition.id,code:error.code});}});throw error;}
   }
   async recover(app){return this.locked(()=>{const state=this.state(),row=state.apps[app],transition=row?.transition;if(!transition)return {recovered:false};if(transition.phase!=='waitingIdle')throw compatError('RECOVERY_REQUIRED','Attachment may have started; restart the desktop before clearing transition');if(transition.runner?.expiresAt>this.now()&&this.alive(transition.runner.pid))throw compatError('REFRESH_DEFERRED_BUSY','A live activation runner still owns this transition');row.transition=null;this.save(state,{app,event:'transition.cancelled',id:transition.id});return {recovered:true};});}
   async importPackage(directory){

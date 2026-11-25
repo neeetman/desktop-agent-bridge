@@ -12,6 +12,8 @@ export const WATCH_POLICY = Object.freeze({
 const CLASSES = [
   { kind: "structural", pattern: /Manual analysis required|found \d+ matches for/i,
     hint: "新版本的内部结构变了，需要修改适配代码，自动验收不会再重试。" },
+  { kind: "permission", pattern: /PermissionError|WinError 5|PROCESS_SNAPSHOT_UNAVAILABLE|(?:desktop_inventory\.py|desktop process).*(?:access denied|拒绝访问)/i,
+    hint: "读取桌面进程信息时被拒绝访问（WinError 5），可能是权限不足或存在提权进程；自动验收不会再重试，请检查后手动触发。" },
   { kind: "user", pattern: /no Node-API callback|callback timed out/i,
     hint: "Codex 没有确认授权。下次自动验收开始时，请在 Codex 窗口里点允许。" },
   { kind: "user", pattern: /test chat unavailable or archived/i,
@@ -46,7 +48,7 @@ export function blockedUnknown(apps) {
 function due(attempt, now, policy) {
   if (!attempt) return true;
   if (!attempt.kind) return false; // record from before classification: leave it alone
-  if (attempt.kind === "structural" || attempt.kind === "activation" || attempt.done) return false;
+  if (["structural", "activation", "permission"].includes(attempt.kind) || attempt.done) return false;
   if ((attempt.count ?? 1) >= policy.maxAttempts) return false;
   return now >= (attempt.nextAt ?? 0);
 }
@@ -86,7 +88,7 @@ export async function watchUnknownBuilds(prefs, deps, policy = WATCH_POLICY) {
   } catch (e) {
     const c = classify(e.message);
     Object.assign(attempt, { status: "需要检查", kind: c.kind, error: e.message, hint: c.hint });
-    const retry = c.kind !== "structural" && attempt.count < policy.maxAttempts;
+    const retry = !["structural", "permission"].includes(c.kind) && attempt.count < policy.maxAttempts;
     if (retry) attempt.nextAt = now + policy.retryAfterMs;
     deps.save(prefs);
     deps.notify(`自动验收失败（${pair.unknown.join("、")}）`,

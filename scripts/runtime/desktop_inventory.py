@@ -17,20 +17,47 @@ def cim_time(ticks):
     return value.strftime('%Y-%m-%dT%H:%M:%S.') + f'{value.microsecond:06d}0Z'
 
 
+def _has_same_app_ancestor(row, by_pid):
+    name = row['Name'].lower()
+    seen = {row['ProcessId']}
+    pid = row.get('ParentProcessId')
+    while pid and pid not in seen:
+        seen.add(pid)
+        parent = by_pid.get(pid)
+        if parent is None:
+            return False
+        if parent['Name'].lower() == name:
+            return True
+        pid = parent.get('ParentProcessId')
+    return False
+
+
 def desktop_rows(rows):
-    return [{'app': 'claude' if row['Name'].lower() == 'claude.exe' else 'codex',
-             'pid': row['ProcessId'], 'createdAt': row['Created'],
-             'executable': str(Path(row['ExecutablePath']).with_name(
-                 'Claude.exe' if row['Name'].lower() == 'claude.exe' else 'ChatGPT.exe'))}
-            for row in rows
-            if (Path(row['ExecutablePath']).parent / 'resources/app.asar').is_file()
-            # Electron helpers (renderer, GPU, crash reporter) carry --type=. A
-            # helper whose main process already exited has no same-image parent
-            # and would otherwise look like a second desktop.
-            and ' --type=' not in (row.get('CommandLine') or '')
-            and not any(parent['ProcessId'] == row['ParentProcessId']
-                        and parent['ExecutablePath'].lower() == row['ExecutablePath'].lower()
-                        for parent in rows)]
+    by_pid = {row['ProcessId']: row for row in rows}
+    result = []
+    for row in rows:
+        app = 'claude' if row['Name'].lower() == 'claude.exe' else 'codex'
+        if row.get('accessDenied'):
+            # An inaccessible helper under a known desktop is harmless; a root
+            # inaccessible candidate must still surface so it is not mistaken
+            # for an absent desktop.
+            if not _has_same_app_ancestor(row, by_pid):
+                result.append({'app': app, 'pid': row['ProcessId'],
+                               'createdAt': None, 'executable': None, 'accessDenied': True})
+            continue
+        exe = row.get('ExecutablePath')
+        if (exe and (Path(exe).parent / 'resources/app.asar').is_file()
+                # Electron helpers (renderer, GPU, crash reporter) carry --type=. A
+                # helper whose main process already exited has no same-image parent
+                # and would otherwise look like a second desktop.
+                and ' --type=' not in (row.get('CommandLine') or '')
+                and not any(parent['ProcessId'] == row['ParentProcessId']
+                            and (parent.get('ExecutablePath') or '').lower() == exe.lower()
+                            for parent in rows)):
+            result.append({'app': app, 'pid': row['ProcessId'], 'createdAt': row['Created'],
+                           'executable': str(Path(exe).with_name(
+                               'Claude.exe' if row['Name'].lower() == 'claude.exe' else 'ChatGPT.exe'))})
+    return result
 
 
 def app_server_host(main_pid, rows=None):
@@ -43,11 +70,13 @@ def app_server_host(main_pid, rows=None):
     main = next((row for row in rows if row['ProcessId'] == main_pid), None)
     if main is None:
         raise RuntimeError('Codex desktop process is not running')
+    if main.get('accessDenied'):
+        raise RuntimeError('Codex desktop process is inaccessible')
     servers = {row['ParentProcessId'] for row in rows
                if row['Name'].lower() == 'codex.exe' and ' app-server' in (row.get('CommandLine') or '')}
     hosts = [row['ProcessId'] for row in rows
              if row['ParentProcessId'] == main_pid
-             and row['ExecutablePath'].lower() == main['ExecutablePath'].lower()
+             and (row.get('ExecutablePath') or '').lower() == main['ExecutablePath'].lower()
              and ' --type=utility' in (row.get('CommandLine') or '')
              and 'node.mojom.NodeService' in (row.get('CommandLine') or '')
              and row['ProcessId'] in servers]
@@ -115,6 +144,68 @@ def command_line(handle):
     return ctypes.wstring_at(value.Buffer, value.Length // 2)
 
 
+_ERROR_ACCESS_DENIED = 5
+_ERROR_INVALID_PARAMETER = 87
+_STILL_ACTIVE = 259
+
+
+def _access_denied_row(pid, parent_pid, exe_name):
+    return {'ProcessId': pid, 'ParentProcessId': parent_pid, 'Name': exe_name,
+            'ExecutablePath': None, 'Created': None, 'CommandLine': None, 'accessDenied': True}
+
+
+def _process_exited(kernel, handle):
+    code = w.DWORD()
+    return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value != _STILL_ACTIVE
+
+
+def _inspect_candidate(pid, parent_pid, exe_name, session_id, kernel,
+                       get_last_error=ctypes.get_last_error, read_command_line=command_line):
+    candidate_session = w.DWORD()
+    if not kernel.ProcessIdToSessionId(pid, ctypes.byref(candidate_session)):
+        err = get_last_error()
+        if err == _ERROR_INVALID_PARAMETER:
+            return None
+        if err == _ERROR_ACCESS_DENIED:
+            return _access_denied_row(pid, parent_pid, exe_name)
+        raise ctypes.WinError(err)
+    if candidate_session.value != session_id:
+        return None
+    handle = kernel.OpenProcess(0x1000, False, pid)
+    if not handle:
+        err = get_last_error()
+        if err == _ERROR_INVALID_PARAMETER:
+            return None
+        if err == _ERROR_ACCESS_DENIED:
+            # Inaccessible candidates must not be mistaken for an absent desktop.
+            return _access_denied_row(pid, parent_pid, exe_name)
+        raise ctypes.WinError(err)
+    try:
+        name = ctypes.create_unicode_buffer(32768)
+        size = w.DWORD(len(name))
+        if not kernel.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)):
+            err = get_last_error()
+            if err == _ERROR_INVALID_PARAMETER or _process_exited(kernel, handle):
+                return None
+            if err == _ERROR_ACCESS_DENIED:
+                return _access_denied_row(pid, parent_pid, exe_name)
+            raise ctypes.WinError(err)
+        times = [w.FILETIME() for _ in range(4)]
+        if not kernel.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            err = get_last_error()
+            if err == _ERROR_INVALID_PARAMETER or _process_exited(kernel, handle):
+                return None
+            if err == _ERROR_ACCESS_DENIED:
+                return _access_denied_row(pid, parent_pid, exe_name)
+            raise ctypes.WinError(err)
+        created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        return {'ProcessId': pid, 'ParentProcessId': parent_pid,
+                'Name': exe_name, 'ExecutablePath': name.value,
+                'Created': cim_time(created), 'CommandLine': read_command_line(handle)}
+    finally:
+        kernel.CloseHandle(handle)
+
+
 def process_rows(names=('chatgpt.exe', 'claude.exe'), pids=None):
     if os.name != 'nt':
         raise RuntimeError('Win32 process inventory requires Windows')
@@ -136,6 +227,8 @@ def process_rows(names=('chatgpt.exe', 'claude.exe'), pids=None):
     kernel.ProcessIdToSessionId.argtypes = [w.DWORD, ctypes.POINTER(w.DWORD)]
     kernel.QueryFullProcessImageNameW.argtypes = [w.HANDLE, w.DWORD, w.LPWSTR, ctypes.POINTER(w.DWORD)]
     kernel.GetProcessTimes.argtypes = [w.HANDLE] + [ctypes.POINTER(w.FILETIME)] * 4
+    kernel.GetExitCodeProcess.argtypes = [w.HANDLE, ctypes.POINTER(w.DWORD)]
+    kernel.GetExitCodeProcess.restype = w.BOOL
     session = w.DWORD()
     if not kernel.ProcessIdToSessionId(os.getpid(), ctypes.byref(session)):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -148,31 +241,10 @@ def process_rows(names=('chatgpt.exe', 'claude.exe'), pids=None):
         found = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
         while found:
             if entry.szExeFile.lower() in names and (pids is None or entry.th32ProcessID in pids):
-                pid = entry.th32ProcessID; candidate_session = w.DWORD()
-                if not kernel.ProcessIdToSessionId(pid, ctypes.byref(candidate_session)):
-                    if ctypes.get_last_error() != 87:
-                        raise ctypes.WinError(ctypes.get_last_error())
-                elif candidate_session.value == session.value:
-                    handle = kernel.OpenProcess(0x1000, False, pid)
-                    if not handle:
-                        # A process that disappeared is harmless; inaccessible
-                        # candidates must not be mistaken for an absent desktop.
-                        if ctypes.get_last_error() != 87:
-                            raise ctypes.WinError(ctypes.get_last_error())
-                    else:
-                        try:
-                            name = ctypes.create_unicode_buffer(32768); size = w.DWORD(len(name))
-                            if not kernel.QueryFullProcessImageNameW(handle, 0, name, ctypes.byref(size)):
-                                raise ctypes.WinError(ctypes.get_last_error())
-                            times = [w.FILETIME() for _ in range(4)]
-                            if not kernel.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
-                                raise ctypes.WinError(ctypes.get_last_error())
-                            created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
-                            rows.append({'ProcessId': pid, 'ParentProcessId': entry.th32ParentProcessID,
-                                         'Name': entry.szExeFile, 'ExecutablePath': name.value,
-                                         'Created': cim_time(created), 'CommandLine': command_line(handle)})
-                        finally:
-                            kernel.CloseHandle(handle)
+                row = _inspect_candidate(entry.th32ProcessID, entry.th32ParentProcessID,
+                                         entry.szExeFile, session.value, kernel)
+                if row is not None:
+                    rows.append(row)
             found = kernel.Process32NextW(snapshot, ctypes.byref(entry))
         if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
             raise ctypes.WinError(ctypes.get_last_error())

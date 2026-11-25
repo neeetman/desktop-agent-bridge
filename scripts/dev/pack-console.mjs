@@ -29,7 +29,15 @@ try {
     main: "main.cjs",
     bridgeRoot: path.resolve(root),
   }, null, 2) + "\n");
-  await rename(staging, output);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(staging, output);
+      break;
+    } catch (error) {
+      if (!["EPERM", "EACCES", "EBUSY"].includes(error.code) || attempt >= 10) throw error;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100 * 2 ** (attempt - 1), 1000)));
+    }
+  }
 } finally {
   await rm(staging, { recursive: true, force: true });
 }
