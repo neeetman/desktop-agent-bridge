@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {codexModelCatalog,resolveSelection,matchRegisteredCwd} from '../../core/collaboration.mjs';
 import policy from '../../core/execution-policy.cjs';
@@ -135,7 +136,16 @@ export class DesktopTools {
     this.windowGuard=windowGuard;
   }
   async listTools() { return this.guardRuntime('codex','read',async()=>{const value=await this.rpc.request('tools/list', { threadStartKind: 'all' });if(!Array.isArray(value.tools))throw compatError('CONTRACT_MISMATCH','Native tools/list contract changed');return value.tools;}); }
-  async listModels(){const tool=(await this.listTools()).find(item=>item.name==='create_thread');return codexModelCatalog(tool?.inputSchema?.properties?.model?.description??'');}
+  async listModels(){
+    const tool=(await this.listTools()).find(item=>item.name==='create_thread');
+    const description=tool?.inputSchema?.properties?.model?.description??'';
+    let cached;
+    if(!/\bsupported reasoning efforts:/i.test(description)){
+      const home=process.env.CODEX_HOME||path.join(os.homedir(),'.codex');
+      try{cached=JSON.parse(fs.readFileSync(path.join(home,'models_cache.json'),'utf8'))?.models;}catch{}
+    }
+    return codexModelCatalog(description,cached);
+  }
   executionCapabilities(){const config=policy.readSettings();return {sandboxModes:['workspace-write','read-only','danger-full-access'],fullAccess:{sandboxMode:'danger-full-access',defaultApprovalPolicy:'never',writableRoots:'omit; full access is unrestricted'},permissionUpdates:'explicit; managed idle Codex threads only; pending approvals rejected',defaultSandboxMode:config.defaultSandboxMode??'workspace-write',approvalPolicies:['on-request','untrusted','never','on-failure'],allowedWritableRoots:config.allowedWritableRoots,executionPolicySettingsFile:policy.settingsFile(),executionPolicyPersistence:'per-thread; revalidated before every bridge wake',cwdPolicy:'registered-project-or-verified-git-worktree'};}
   async setPermissions(threadId,input){await this.checkExecutionReady();return this.executionRuntime.executionRpc('set_permissions',{threadId,policy:input});}
   async preflightDispatch(input){await this.guardRuntime('codex','send',async()=>{});if(input.threadId&&this.isExecutionManaged(input.threadId)&&!(input.peerNotification===true&&input.callbackMode==='peer'))await this.checkExecutionReady();}

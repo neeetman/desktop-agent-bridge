@@ -9,11 +9,29 @@ export function publicResult(value) {
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).filter(([key])=>!/^(?:token|accessToken|refreshToken|authorization|apiKey|password|clientSecret)$/i.test(key)).map(([key,item])=>[key,publicResult(item)]));
 }
-export function codexModelCatalog(description) {
+export function codexModelCatalog(description, cachedModels) {
   const models=[];
-  for(const match of description.matchAll(/([a-z0-9][a-z0-9.-]+) \(([^()]*)supported reasoning efforts: ([a-z, ]+)\)/gi))models.push({id:match[1],description:match[2].trim(),efforts:match[3].split(',').map(x=>x.trim())});
+  let source='running-desktop-create_thread-declaration';
+  for(const match of String(description??'').matchAll(/([a-z0-9][a-z0-9.-]+) \(([^()]*)supported reasoning efforts: ([a-z, ]+)\)/gi))models.push({id:match[1],description:match[2].trim(),efforts:match[3].split(',').map(x=>x.trim())});
+  if(!models.length&&Array.isArray(cachedModels)){
+    source='codex-models-cache';
+    for(const item of cachedModels){
+      if(!item?.slug||item.visibility==='hide')continue;
+      const efforts=(item.supported_reasoning_levels??[]).map(level=>typeof level==='string'?level:level?.effort).filter(Boolean);
+      if(!efforts.length)continue;
+      models.push({id:item.slug,...(item.display_name?{displayName:item.display_name}:{}),description:String(item.description??'').trim(),efforts});
+    }
+  }
   if(!models.length)throw new Error('Native model declaration format changed; cannot safely infer model IDs');
-  return {source:'running-desktop-create_thread-declaration',models,aliases:{'sol 6.1':'gpt-6.1-sol','sol6.1':'gpt-6.1-sol'},effortAliases:{median:'medium'}};
+  const aliases={'sol 6.1':'gpt-6.1-sol','sol6.1':'gpt-6.1-sol'};
+  for(const item of models){
+    const match=/^gpt-(\d+(?:\.\d+)?)-([a-z0-9]+)$/i.exec(item.id);
+    if(!match)continue;
+    const [,ver,family]=match,f=family.toLowerCase();
+    aliases[`${f} ${ver}`]=item.id;
+    aliases[`${f}${ver}`]=item.id;
+  }
+  return {source,models,aliases,effortAliases:{median:'medium'}};
 }
 export function resolveSelection(catalog,model,effort){
   const id=catalog.aliases?.[model?.toLowerCase()]??model,selected=catalog.models.find(item=>item.id===id);

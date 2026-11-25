@@ -26,6 +26,17 @@ test('live model declaration supplies IDs and model-specific efforts; aliases ne
   assert.throws(()=>resolveSelection(c,'gpt-6-luna','ultra'),/supports/);
   assert.throws(()=>resolveSelection({models:[],aliases:c.aliases},'sol 6.1'),/Unknown/);
   assert.throws(()=>codexModelCatalog('unknown format'),/changed/);
+  const c261120=codexModelCatalog(
+    'Do not specify a model unless the user explicitly requests a specific model.',
+    [
+      {slug:'gpt-6.2-sol',display_name:'GPT-6.2-Sol',description:'Fast go-to model.',visibility:'list',supported_reasoning_levels:[{effort:'low'},{effort:'medium'},{effort:'high'},{effort:'xhigh'},{effort:'max'},{effort:'ultra'}]},
+      {slug:'gpt-reserve',visibility:'hide',supported_reasoning_levels:[{effort:'low'}]},
+    ],
+  );
+  assert.equal(c261120.source,'codex-models-cache');
+  assert.deepEqual(c261120.models.map(m=>m.id),['gpt-6.2-sol']);
+  assert.equal(resolveSelection(c261120,'sol 6.2','high'),'gpt-6.2-sol');
+  assert.equal(resolveSelection(c261120,'sol6.2','ultra'),'gpt-6.2-sol');
 });
 test('cwd must exactly match the selected native project and cannot fall back to a parent checkout',()=>{
   const projects=[{projectId:'main',path:'D:\\ExampleProject'},{projectId:'worktree',path:'D:\\ExampleProject-work\\wt\\test'}];
